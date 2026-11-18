@@ -1044,13 +1044,29 @@ function AutoFarm.create(deps)
             state.carryConfirmedAt = os.clock()
             state.depositWaitSince = nil
         else
+            local rootPart = Movement.GetRootPart()
+            local standbyPos = runtime.standbyPosition
+            local atStandby = rootPart and standbyPos
+                and isAtStandby(rootPart.Position, standbyPos)
+
+            local confirmedAt = state.carryConfirmedAt
+            local confirmedFor = confirmedAt and (os.clock() - confirmedAt) or 0
+
+            if not atStandby then
+                state.isCarrying = true
+                state.depositWaitSince = state.depositWaitSince or os.clock()
+                return
+            end
+
+            state.isCarrying = false
+            state.carryUid = nil
             state.carryConfirmedAt = nil
             state.depositWaitSince = nil
             state.targetEgg = nil
             state.waypoints = nil
             state.pathGoal = nil
-            setServerActionMode(false)
             state.pickupSettleTicks = 0
+            setServerActionMode(false)
 
             if state.enabled then
                 setPhase(PHASE.Standby, "deposit complete")

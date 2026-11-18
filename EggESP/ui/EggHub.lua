@@ -163,8 +163,21 @@ function EggHub.create(deps)
         header.BorderSizePixel = 0
         header.Parent = content
 
-        text(header, "Automation", 20, colors.text, UDim2.fromOffset(24, 14), UDim2.new(0.6, 0, 0, 26))
-        text(header, "Steal An Egg", 11, colors.muted, UDim2.fromOffset(24, 40), UDim2.new(0.6, 0, 0, 16))
+        text(header, "Automation", 20, colors.text, UDim2.fromOffset(24, 10), UDim2.new(0.45, 0, 0, 26))
+        text(header, "Steal An Egg", 11, colors.muted, UDim2.fromOffset(24, 36), UDim2.new(0.45, 0, 0, 16))
+
+        local statusCard = Instance.new("Frame")
+        statusCard.Name = "Status"
+        statusCard.AnchorPoint = Vector2.new(1, 0.5)
+        statusCard.Position = UDim2.new(1, -62, 0.5, 0)
+        statusCard.Size = UDim2.new(0, 430, 0, 48)
+        statusCard.BackgroundColor3 = colors.panel2
+        statusCard.BorderSizePixel = 0
+        statusCard.Parent = header
+        corner(statusCard, 10)
+
+        local statusText = text(statusCard, "Loading status...", 11, colors.muted, UDim2.fromOffset(14, 0), UDim2.new(1, -28, 1, 0))
+        statusText.TextWrapped = true
 
         local close = Instance.new("TextButton")
         close.Position = UDim2.new(1, -48, 0, 18)
@@ -447,6 +460,8 @@ function EggHub.create(deps)
         toggle(left, "Infested First", "Prioritize parasite eggs", function() return runtime.autoFarmInfestedFirst ~= false end, function(v) runtime.autoFarmInfestedFirst = v end)
         toggle(left, "Anti Guard", "Use guard-zone walking behavior", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v; if PathService then PathService.Invalidate() end end)
         slider(left, "Tween Speed", function() return runtime.tweenSpeed or 700 end, function(v) runtime.tweenSpeed = v end, 300, 1000, 50, "")
+        slider(left, "Pickup Speed", function() return runtime.pickupSyncWalkSpeed or 28 end, function(v) runtime.pickupSyncWalkSpeed = v end, 16, 60, 2, "")
+        slider(left, "Pickup Settling", function() return runtime.pickupSyncSettleTicks or 8 end, function(v) runtime.pickupSyncSettleTicks = v end, 4, 20, 1, " ticks")
         button(left, "Set Standby Here", "Use your current position", function()
             local character = LocalPlayer.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
@@ -539,8 +554,15 @@ function EggHub.create(deps)
             while statusRunning do
                 runWithPluginIdentity(function()
                     if gui and window then
-                        local status = window:FindFirstChild("Status", true)
-                        if status and status.SetText then status:SetText(formatStatus()) end
+                        local statusCard = window:FindFirstChild("Status", true)
+                        if statusCard then
+                            for _, child in ipairs(statusCard:GetChildren()) do
+                                if child:IsA("TextLabel") then
+                                    child.Text = formatStatus()
+                                    break
+                                end
+                            end
+                        end
                     end
                 end)
                 task.wait(runtime.hubStatusRefreshInterval or 1)
