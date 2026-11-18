@@ -18,7 +18,16 @@ function BasePenAutomation.create(deps)
     local runtime = Config.Runtime
 
     local BaseUpgrade = require(ReplicatedStorage.Client.BaseUpgrade)
-    local BaseUpgradeTransitionLifecycle = require(ReplicatedStorage.Client.BaseUpgradeTransitionLifecycle)
+    local BaseUpgradeTransitionLifecycle
+    do
+        local lifecycleModule = ReplicatedStorage.Client:FindFirstChild("BaseUpgradeTransitionLifecycle")
+        if lifecycleModule then
+            local ok, module = pcall(require, lifecycleModule)
+            if ok then
+                BaseUpgradeTransitionLifecycle = module
+            end
+        end
+    end
     local OfflineAssets = require(ReplicatedStorage.Client.Types.OfflineAssets)
     local Constants = require(ReplicatedStorage.Shared.Globals.Constants)
     local Player = require(ReplicatedStorage.Shared.Player)
@@ -291,7 +300,9 @@ function BasePenAutomation.create(deps)
             return false
         end
 
-        if BaseUpgradeTransitionLifecycle.IsPlaying() then
+        if BaseUpgradeTransitionLifecycle
+            and BaseUpgradeTransitionLifecycle.IsPlaying
+            and BaseUpgradeTransitionLifecycle.IsPlaying() then
             return false
         end
 
