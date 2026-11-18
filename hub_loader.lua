@@ -24,72 +24,8 @@
 
 local genv = (type(getgenv) == "function" and getgenv()) or _G
 
-local VOIDUI_SHA = "ed27ccf745d7835dd9e16245979407fb4440d2bb"
-local VOIDUI_URL = "https://raw.githubusercontent.com/Sanchez1911/VoidUI/" .. VOIDUI_SHA .. "/VoidUI.lua"
-
-local VOIDUI_LOCAL = {
-    "Steal-An-Egg/EggESP/ui/VoidUI.lua",
-    "EggESP/ui/VoidUI.lua",
-    "GUI/VoidUI.lua",
-    "VoidUI.lua",
-}
-
--- Same loadLib pattern as VoidUI.Example.lua — HttpGet + loadstring only (never loadfile VoidUI)
-local function preloadVoidUI()
-    if genv.__EGGESP_VOIDUI then
-        return genv.__EGGESP_VOIDUI
-    end
-
-    local ok, body = pcall(function()
-        return game:HttpGet(VOIDUI_URL)
-    end)
-
-    if ok and typeof(body) == "string" and #body > 500 then
-        if body:find("Soft text bloom %(accent glow", 1, true) and not body:find("after mk", 1, true) then
-            error("VoidUI stale cache — reopen with SHA URL", 0)
-        end
-
-        local fn, err = loadstring(body, "@VoidUI")
-
-        if fn then
-            local ok2, lib = pcall(fn)
-
-            if ok2 and lib then
-                genv.__EGGESP_VOIDUI = lib
-                return lib
-            end
-
-            error("VoidUI exec: " .. tostring(lib), 0)
-        end
-
-        error("VoidUI compile: " .. tostring(err), 0)
-    end
-
-    if type(readfile) == "function" and type(loadstring) == "function" then
-        local isfileFn = type(isfile) == "function" and isfile or nil
-
-        for _, path in ipairs(VOIDUI_LOCAL) do
-            if not isfileFn or isfileFn(path) then
-                local readOk, source = pcall(readfile, path)
-
-                if readOk and typeof(source) == "string" and #source > 500 then
-                    local fn = loadstring(source, "@" .. path)
-
-                    if fn then
-                        local ok3, lib = pcall(fn)
-
-                        if ok3 and lib then
-                            genv.__EGGESP_VOIDUI = lib
-                            return lib
-                        end
-                    end
-                end
-            end
-        end
-    end
-
-    error("VoidUI load failed — check HttpGet / local VoidUI.lua", 0)
-end
+genv.__EGGESP_USE_NATIVE_HUB = true
+print("[Hub] Native FIGGY UI enabled")
 
 local VOID_BUILD_PATHS = {
     "Steal-An-Egg/EggESP/ui/void_build.lua",
@@ -366,16 +302,6 @@ local function buildVoidMenuFromLoader(hub)
     end
 
     return false
-end
-
-if genv.__HUB_FORCE_DRAWING ~= true then
-    local voidOk, voidResult = pcall(preloadVoidUI)
-
-    if voidOk then
-        print(string.format("[Hub] VoidUI %s preloaded (sha %s)", tostring(voidResult.Version), VOIDUI_SHA:sub(1, 8)))
-    else
-        warn("[Hub] VoidUI preload failed: " .. tostring(voidResult))
-    end
 end
 
 local BRIDGE_PATHS = {

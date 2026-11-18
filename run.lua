@@ -42,6 +42,7 @@ local FILES = {
     "EggESP/esp/TreadmillData.lua",
     "EggESP/ui/FarmFilterUI.lua",
     "EggESP/ui/Hub.lua",
+    "EggESP/ui/EggHub.lua",
     "EggESP/ui/VoidUI.lua",
     "EggESP/ui/VoidUIHub.lua",
     "EggESP/ui/void_build.lua",

@@ -51,7 +51,7 @@ local DiagnosticsModule = import("core/Diagnostics")
 local FarmFiltersModule = import("core/FarmFilters")
 local FarmFilterUIModule = import("ui/FarmFilterUI")
 local HubDrawingModule = import("ui/Hub")
-local VoidUIHubModule = import("ui/VoidUIHub")
+local EggHubModule = import("ui/EggHub")
 local ControllerModule = import("esp/Controller")
 
 local Players = game:GetService("Players")
@@ -219,23 +219,25 @@ local DrawingHub = HubDrawingModule.create({
 local genv = (type(getgenv) == "function" and getgenv()) or _G
 local forceDrawing = genv.__HUB_FORCE_DRAWING == true
 
-local Hub = forceDrawing and DrawingHub or VoidUIHubModule.create({
+local Hub = EggHubModule.create({
     Config = Config,
-    Util = Util,
     UserInputService = UserInputService,
     RunService = RunService,
     AutoFarm = AutoFarm,
     SpeedBypass = SpeedBypass,
     PathService = PathService,
-    DrawingHub = DrawingHub,
     Diagnostics = Diagnostics,
     FarmFilters = FarmFilters,
-    FarmFilterUI = FarmFilterUIModule,
     EggData = EggData,
     BasePenAutomation = BasePenAutomation,
     InventoryManager = InventoryManager,
+    PetAutomation = PetAutomation,
     LocalPlayer = deps.LocalPlayer,
 })
+
+if Hub.AttachKeybind then
+    Hub.AttachKeybind()
+end
 
 Controller.SetHub(Hub)
 
