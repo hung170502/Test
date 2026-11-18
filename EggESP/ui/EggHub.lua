@@ -123,6 +123,8 @@ function EggHub.create(deps)
         return l
     end
 
+    local buildPages
+
     local function makeWindow()
         if window and window.Parent then
             return window
@@ -694,7 +696,7 @@ function EggHub.create(deps)
         return row
     end
 
-    local function buildPages()
+    buildPages = function()
         local home = pageBuilders.pages.Home
         local homeLeft = section(home, "OVERVIEW", UDim2.new(0.5, -8, 0, 0))
         homeLeft.Position = UDim2.fromOffset(0, 0)

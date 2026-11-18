@@ -43,9 +43,6 @@ local FILES = {
     "EggESP/ui/FarmFilterUI.lua",
     "EggESP/ui/Hub.lua",
     "EggESP/ui/EggHub.lua",
-    "EggESP/ui/VoidUI.lua",
-    "EggESP/ui/VoidUIHub.lua",
-    "EggESP/ui/void_build.lua",
 }
 
 local genv = (type(getgenv) == "function" and getgenv()) or _G
@@ -58,24 +55,19 @@ end)
 cacheToken = cacheToken or tostring(math.random(100000, 999999))
 
 local function httpGet(url)
-    local urls = {
-        url .. (url:find("?", 1, true) and "&" or "?") .. "x=" .. cacheToken,
-        url,
-    }
+    local requestUrl = url .. (url:find("?", 1, true) and "&" or "?") .. "cache=" .. cacheToken
 
-    for _, requestUrl in ipairs(urls) do
-        if game ~= nil then
-            local ok, body = pcall(function() return game:HttpGet(requestUrl) end)
-            if ok and typeof(body) == "string" and #body > 0 then
-                return body
-            end
+    if game ~= nil then
+        local ok, body = pcall(function() return game:HttpGet(requestUrl) end)
+        if ok and typeof(body) == "string" and #body > 0 then
+            return body
         end
+    end
 
-        if type(httpget) == "function" then
-            local ok, body = pcall(httpget, requestUrl)
-            if ok and typeof(body) == "string" and #body > 0 then
-                return body
-            end
+    if type(httpget) == "function" then
+        local ok, body = pcall(httpget, requestUrl)
+        if ok and typeof(body) == "string" and #body > 0 then
+            return body
         end
     end
 
@@ -96,14 +88,16 @@ for _, relativePath in ipairs(FILES) do
     if typeof(source) == "string" and #source > 0 then
         local trimmed = source:gsub("^%s+", "")
         local lower = trimmed:lower()
+
         if lower:sub(1, 9) == "<!doctype"
             or lower:sub(1, 5) == "<html"
             or lower:sub(1, 1) == "<"
             or trimmed:sub(1, 5) == "404: "
-            or trimmed:sub(1, 9) == "not found" then
+            or trimmed:sub(1, 9) == "Not Found" then
             table.insert(failedFiles, relativePath .. " (HTML/error page)")
         else
             local chunk, compileErr = loadstring(source, "@remote/" .. relativePath)
+
             if chunk then
                 addFile(relativePath, source)
                 downloaded = downloaded + 1
@@ -155,22 +149,27 @@ local virtualReadfile = function(path)
     if typeof(source) == "string" and #source > 0 then
         return source
     end
+
     if type(originalReadfile) == "function" then
         return originalReadfile(path)
     end
+
     error("File not found: " .. tostring(path), 0)
 end
 
 local virtualLoadfile = function(path)
     local source = findVirtual(path)
+
     if typeof(source) == "string" and #source > 0 then
         local chunk, err = loadstring(source, "@" .. tostring(path))
         if chunk then return chunk end
         return nil, err
     end
+
     if type(originalLoadfile) == "function" then
         return originalLoadfile(path)
     end
+
     return nil, "File not found: " .. tostring(path)
 end
 
@@ -184,6 +183,7 @@ end)
 
 local hubSource = virtualFiles["hub_loader.lua"]
 local chunk, err = loadstring(hubSource, "@StealAnEggHub/hub_loader.lua")
+
 if not chunk then
     error("[Hub] run.lua compile failed: " .. tostring(err), 0)
 end
