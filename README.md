@@ -13,6 +13,14 @@ Auto-farm hub for **Steal An Egg** on Roblox (Potassium executor).
 
 ## Quick start
 
+Remote executor (no local files required):
+
+```lua
+loadstring(game:HttpGet("https://raw.githubusercontent.com/hung170502/Test/main/run.lua"))()
+```
+
+Local workspace:
+
 ```lua
 loadstring(readfile("Steal-An-Egg/run.lua"))()
 -- or
@@ -33,4 +41,4 @@ Run `potassium_bridge.lua` in-game while using Cursor MCP tools.
 ## Disclaimer
 
 For educational / personal use. Use at your own risk on Roblox ToS.
-"# Test" 
+"# Test"

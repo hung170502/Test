@@ -287,6 +287,35 @@ local function tryLoadVoidBuildFn()
         return __EGGESP_VOID_BUILD
     end
 
+    if type(readfile) == "function" and type(loadstring) == "function" then
+        for _, path in ipairs(VOID_BUILD_PATHS) do
+            local readOk, source = pcall(readfile, path)
+
+            if readOk and typeof(source) == "string" and #source > 0 then
+                local transformed, count = source:gsub(
+                    "return%s+function%s*%(ctx%)",
+                    "local function __EGGESP_VOID_BUILD(ctx)",
+                    1
+                )
+
+                if count > 0 then
+                    transformed = transformed .. "\nreturn __EGGESP_VOID_BUILD\n"
+                    local chunk, err = loadstring(transformed, "@" .. path)
+
+                    if chunk then
+                        local ok, buildFn = pcall(chunk)
+                        if ok and typeof(buildFn) == "function" then
+                            return buildFn
+                        end
+                        warn("[Hub] void_build execution failed: " .. tostring(buildFn))
+                    else
+                        warn("[Hub] void_build compile failed: " .. tostring(err))
+                    end
+                end
+            end
+        end
+    end
+
     return nil
 end
 
