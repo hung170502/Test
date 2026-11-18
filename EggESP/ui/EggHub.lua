@@ -43,31 +43,35 @@ function EggHub.create(deps)
 
     local function runWithPluginIdentity(fn)
         if type(fn) ~= "function" then
-            return
+            return false
         end
 
         local previous
 
         if type(getthreadidentity) == "function" then
-            local ok, value = pcall(getthreadidentity)
-            if ok then previous = value end
+            local identityOk, identity = pcall(getthreadidentity)
+
+            if identityOk then
+                previous = identity
+            end
         end
 
         if type(setthreadidentity) == "function" then
             pcall(setthreadidentity, 8)
         end
 
-        local results = table.pack(pcall(fn))
+        local ok, result = pcall(fn)
 
         if type(setthreadidentity) == "function" and previous ~= nil then
             pcall(setthreadidentity, previous)
         end
 
-        if not results[1] then
-            warn("[FIGGY] UI callback failed: " .. tostring(results[2]))
+        if not ok then
+            warn("[FIGGY] UI callback failed: " .. tostring(result))
+            return false, result
         end
 
-        return table.unpack(results, 2, results.n)
+        return true, result
     end
 
     local function ensureGui()
@@ -606,9 +610,16 @@ function EggHub.create(deps)
     local function SetVisible(value)
         runtime.hubVisible = value == true
         visible = runtime.hubVisible
-        runWithPluginIdentity(function()
-            if window then window.Visible = visible end
-        end)
+
+        if window then
+            local ok = pcall(function()
+                window.Visible = visible
+            end)
+
+            if not ok then
+                warn("[FIGGY] Cannot change window visibility")
+            end
+        end
     end
 
     local function ToggleVisible()
@@ -617,11 +628,25 @@ function EggHub.create(deps)
     end
 
     local function start()
-        runWithPluginIdentity(function()
+        local ok, err = runWithPluginIdentity(function()
             makeWindow()
             attachKeybind()
             SetVisible(runtime.hubVisible ~= false)
         end)
+
+        if not ok then
+            warn("[FIGGY] Start fallback: " .. tostring(err))
+
+            local fallbackOk = pcall(function()
+                makeWindow()
+            end)
+
+            if fallbackOk then
+                SetVisible(runtime.hubVisible ~= false)
+                attachKeybind()
+            end
+        end
+
         startStatusLoop()
     end
 
