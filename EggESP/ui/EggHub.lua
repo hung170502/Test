@@ -41,6 +41,35 @@ function EggHub.create(deps)
         red = Color3.fromRGB(244, 114, 182),
     }
 
+    local function runWithPluginIdentity(fn)
+        if type(fn) ~= "function" then
+            return
+        end
+
+        local previous
+
+        if type(getthreadidentity) == "function" then
+            local ok, value = pcall(getthreadidentity)
+            if ok then previous = value end
+        end
+
+        if type(setthreadidentity) == "function" then
+            pcall(setthreadidentity, 8)
+        end
+
+        local results = table.pack(pcall(fn))
+
+        if type(setthreadidentity) == "function" and previous ~= nil then
+            pcall(setthreadidentity, previous)
+        end
+
+        if not results[1] then
+            warn("[FIGGY] UI callback failed: " .. tostring(results[2]))
+        end
+
+        return table.unpack(results, 2, results.n)
+    end
+
     local function ensureGui()
         if gui and gui.Parent then
             return gui
@@ -616,31 +645,6 @@ function EggHub.create(deps)
                 ToggleVisible()
             end
         end)
-    end
-
-    local function runWithPluginIdentity(fn)
-        local previous
-
-        if type(getthreadidentity) == "function" then
-            local ok, value = pcall(getthreadidentity)
-            if ok then previous = value end
-        end
-
-        if type(setthreadidentity) == "function" then
-            pcall(setthreadidentity, 8)
-        end
-
-        local results = table.pack(pcall(fn))
-
-        if type(setthreadidentity) == "function" and previous ~= nil then
-            pcall(setthreadidentity, previous)
-        end
-
-        if not results[1] then
-            warn("[FIGGY] UI callback failed: " .. tostring(results[2]))
-        end
-
-        return table.unpack(results, 2, results.n)
     end
 
     return {
