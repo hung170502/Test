@@ -51,13 +51,17 @@ local genv = (type(getgenv) == "function" and getgenv()) or _G
 local virtualFiles = {}
 
 local function httpGet(url)
-    if type(game) == "table" and type(game.HttpGet) == "function" then
+    if game ~= nil then
         local ok, body = pcall(function() return game:HttpGet(url) end)
-        if ok then return body end
+        if ok and typeof(body) == "string" and #body > 0 then
+            return body
+        end
     end
     if type(httpget) == "function" then
         local ok, body = pcall(httpget, url)
-        if ok then return body end
+        if ok and typeof(body) == "string" and #body > 0 then
+            return body
+        end
     end
     return nil
 end
