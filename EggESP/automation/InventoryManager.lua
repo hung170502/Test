@@ -67,6 +67,32 @@ function InventoryManager.create(deps)
         feedOnlyMode = false,
     }
 
+    local function getSave()
+        if not Save or type(Save.Get) ~= "function" then
+            return nil
+        end
+
+        if type(Save.IsLocalDataLoaded) == "function" then
+            local loadedOk, loaded = pcall(Save.IsLocalDataLoaded)
+
+            if not loadedOk or loaded ~= true then
+                return nil
+            end
+        end
+
+        local ok, saveData = pcall(Save.Get, LocalPlayer)
+
+        if not ok or typeof(saveData) ~= "table" then
+            ok, saveData = pcall(Save.Get)
+        end
+
+        if not ok or typeof(saveData) ~= "table" then
+            return nil
+        end
+
+        return saveData
+    end
+
     local function getRootPart()
         if Movement and Movement.GetRootPart then
             return Movement.GetRootPart()
