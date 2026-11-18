@@ -50,15 +50,18 @@ local FILES = {
 local genv = (type(getgenv) == "function" and getgenv()) or _G
 local virtualFiles = {}
 
+local cacheToken = tostring(os.time())
+
 local function httpGet(url)
+    local cachedUrl = url .. "?cache=" .. cacheToken
     if game ~= nil then
-        local ok, body = pcall(function() return game:HttpGet(url) end)
+        local ok, body = pcall(function() return game:HttpGet(cachedUrl) end)
         if ok and typeof(body) == "string" and #body > 0 then
             return body
         end
     end
     if type(httpget) == "function" then
-        local ok, body = pcall(httpget, url)
+        local ok, body = pcall(httpget, cachedUrl)
         if ok and typeof(body) == "string" and #body > 0 then
             return body
         end
