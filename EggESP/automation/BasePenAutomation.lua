@@ -53,11 +53,27 @@ function BasePenAutomation.create(deps)
     end
 
     local function getSave()
-        if not Save.IsLocalDataLoaded() then
+        if not Save then
             return nil
         end
 
-        return Save.Get()
+        if type(Save.IsLocalDataLoaded) == "function" then
+            local ok, loaded = pcall(Save.IsLocalDataLoaded)
+            if not ok or not loaded then
+                return nil
+            end
+        end
+
+        if type(Save.Get) ~= "function" then
+            return nil
+        end
+
+        local ok, saveData = pcall(Save.Get)
+        if not ok then
+            return nil
+        end
+
+        return saveData
     end
 
     local function getRootPart()

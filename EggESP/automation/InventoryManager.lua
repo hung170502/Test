@@ -163,7 +163,7 @@ function InventoryManager.create(deps)
     end
 
     local function countEggs()
-        local save = Save.Get()
+        local save = getSave()
         local inventory = save and save.EggInventory
 
         if typeof(inventory) ~= "table" then
@@ -194,7 +194,7 @@ function InventoryManager.create(deps)
     end
 
     local function collectUnplacedEggs(parasiteOnly)
-        local save = Save.Get()
+        local save = getSave()
         local inventory = save and save.EggInventory
         local results = {}
 
@@ -303,7 +303,7 @@ function InventoryManager.create(deps)
     end
 
     local function isEggUnplaced(uid)
-        local save = Save.Get()
+        local save = getSave()
         local egg = save and save.EggInventory and save.EggInventory[uid]
 
         return typeof(egg) == "table" and egg.Placement == nil

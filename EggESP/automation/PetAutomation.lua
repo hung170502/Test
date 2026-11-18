@@ -27,7 +27,16 @@ function PetAutomation.create(deps)
     }
 
     local function getSave()
-        return Save.Get()
+        if not Save or type(Save.Get) ~= "function" then
+            return nil
+        end
+
+        local ok, saveData = pcall(Save.Get)
+        if not ok then
+            return nil
+        end
+
+        return saveData
     end
 
     local function isEnabled()

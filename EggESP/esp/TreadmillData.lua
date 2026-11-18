@@ -175,7 +175,13 @@ function TreadmillData.create(deps)
             return nil
         end
 
-        local saveData = Save.Get(LocalPlayer)
+        local saveData = nil
+        if Save and type(Save.Get) == "function" then
+            local ok, saveResult = pcall(Save.Get, LocalPlayer)
+            if ok then
+                saveData = saveResult
+            end
+        end
         local level = 1
 
         if saveData and typeof(saveData.TreadmillUpgradeLevel) == "number" then
