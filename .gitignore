@@ -1,0 +1,24 @@
+# Secrets / local config
+.env
+.env.*
+*.pem
+*.key
+credentials.json
+
+# Cursor local MCP (machine-specific paths)
+.cursor/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+
+# Logs / temp
+*.log
+tmp/
+temp/
+
+# Large local place file (optional — keep if you want it in repo)
+# Place_107778070777162.rbxlx
