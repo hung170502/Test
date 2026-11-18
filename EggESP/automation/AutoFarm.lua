@@ -753,7 +753,7 @@ function AutoFarm.create(deps)
             setPhase(PHASE.Pickup, dist <= carryR and egg.info.name or "approaching")
 
             if dist > carryR then
-                Movement.WalkTo(eggPos, runtime.pickupSyncWalkSpeed or 24)
+                moveToEggPosition(eggPos)
                 state.pickupSettleTicks = 0
                 return
             end
@@ -777,7 +777,7 @@ function AutoFarm.create(deps)
         end
 
         setServerActionMode(false)
-        followPath(eggPos, moveR)
+        moveToEggPosition(eggPos)
     end
 
     local function shouldAutoPlaceDuringFarm()
@@ -880,7 +880,7 @@ function AutoFarm.create(deps)
             else
                 setPhase(PHASE.ReturnStandby)
                 setServerActionMode(false)
-                followPath(standbyPos, runtime.standbyArriveRadius)
+                moveToDelivery(standbyPos)
             end
 
             return
@@ -1196,6 +1196,74 @@ function AutoFarm.create(deps)
             state.characterConnection:Disconnect()
             state.characterConnection = nil
         end
+    end
+
+    local function moveToEggPosition(targetPos)
+        local method = tostring(runtime.moveToEggMethod or "Teleport")
+
+        if method == "Teleport" and Movement.TeleportTo then
+            return Movement.TeleportTo(targetPos)
+        end
+
+        if method == "Quick Steps" then
+            local rootPart = Movement.GetRootPart()
+
+            if rootPart then
+                local delta = targetPos - rootPart.Position
+                local flat = Vector3.new(delta.X, 0, delta.Z)
+
+                if flat.Magnitude > 60 then
+                    flat = flat.Unit * 60
+                end
+
+                if Movement.TeleportTo then
+                    return Movement.TeleportTo(rootPart.Position + flat)
+                end
+
+                return Movement.WalkTo(rootPart.Position + flat, 32)
+            end
+        end
+
+        if method == "Fast Tween" and Movement.TweenTo then
+            Movement.TweenTo(targetPos, math.max(runtime.tweenSpeed or 700, 900))
+            return true
+        end
+
+        return Movement.WalkTo(targetPos, runtime.pickupSyncWalkSpeed or 28)
+    end
+
+    local function moveToDelivery(targetPos)
+        local method = tostring(runtime.deliveryMethod or "Fast Tween")
+
+        if method == "Teleport" and Movement.TeleportTo then
+            return Movement.TeleportTo(targetPos)
+        end
+
+        if method == "Quick Steps" then
+            local rootPart = Movement.GetRootPart()
+
+            if rootPart then
+                local delta = targetPos - rootPart.Position
+                local flat = Vector3.new(delta.X, 0, delta.Z)
+
+                if flat.Magnitude > 50 then
+                    flat = flat.Unit * 50
+                end
+
+                if Movement.TeleportTo then
+                    return Movement.TeleportTo(rootPart.Position + flat)
+                end
+
+                return Movement.WalkTo(rootPart.Position + flat, 32)
+            end
+        end
+
+        if method == "Fast Tween" and Movement.TweenTo then
+            Movement.TweenTo(targetPos, math.max(runtime.tweenSpeed or 700, 1000))
+            return true
+        end
+
+        return followPath(targetPos, runtime.standbyArriveRadius)
     end
 
     return {

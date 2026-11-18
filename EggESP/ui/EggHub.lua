@@ -507,6 +507,41 @@ function EggHub.create(deps)
         return g
     end
 
+    local function methodButton(parent, title, options, getValue, setValue)
+        local b = Instance.new("TextButton")
+        b.Size = UDim2.new(1, 0, 0, 58)
+        b.BackgroundColor3 = colors.panel2
+        b.BorderSizePixel = 0
+        b.Text = ""
+        b.AutoButtonColor = false
+        b.Parent = parent
+        corner(b, 9)
+
+        text(b, title, 12, colors.text, UDim2.fromOffset(14, 8), UDim2.new(0.55, 0, 0, 20))
+        local valueLabel = text(b, tostring(getValue()), 12, colors.accent, UDim2.new(0.55, 0, 0, 0), UDim2.new(0.45, -14, 1, 0))
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+        b.Activated:Connect(function()
+            runWithPluginIdentity(function()
+                local current = tostring(getValue())
+                local index = 1
+
+                for i, option in ipairs(options) do
+                    if option == current then
+                        index = i
+                        break
+                    end
+                end
+
+                local nextIndex = (index % #options) + 1
+                setValue(options[nextIndex])
+                valueLabel.Text = tostring(options[nextIndex])
+            end)
+        end)
+
+        return b
+    end
+
     function buildPages()
         local eggs = pageBuilders.pages.Eggs
         local left = section(eggs, "AUTO STEAL", UDim2.new(0.5, -8, 0, 0))

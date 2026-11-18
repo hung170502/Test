@@ -51,21 +51,34 @@ local FILES = {
 local genv = (type(getgenv) == "function" and getgenv()) or _G
 local virtualFiles = {}
 
-local cacheToken = nil
+local cacheToken
+pcall(function()
+    cacheToken = tostring(os.time())
+end)
+cacheToken = cacheToken or tostring(math.random(100000, 999999))
 
 local function httpGet(url)
-    if game ~= nil then
-        local ok, body = pcall(function() return game:HttpGet(url) end)
-        if ok and typeof(body) == "string" and #body > 0 then
-            return body
+    local urls = {
+        url .. (url:find("?", 1, true) and "&" or "?") .. "x=" .. cacheToken,
+        url,
+    }
+
+    for _, requestUrl in ipairs(urls) do
+        if game ~= nil then
+            local ok, body = pcall(function() return game:HttpGet(requestUrl) end)
+            if ok and typeof(body) == "string" and #body > 0 then
+                return body
+            end
+        end
+
+        if type(httpget) == "function" then
+            local ok, body = pcall(httpget, requestUrl)
+            if ok and typeof(body) == "string" and #body > 0 then
+                return body
+            end
         end
     end
-    if type(httpget) == "function" then
-        local ok, body = pcall(httpget, url)
-        if ok and typeof(body) == "string" and #body > 0 then
-            return body
-        end
-    end
+
     return nil
 end
 
@@ -85,12 +98,18 @@ for _, relativePath in ipairs(FILES) do
         local lower = trimmed:lower()
         if lower:sub(1, 9) == "<!doctype"
             or lower:sub(1, 5) == "<html"
+            or lower:sub(1, 1) == "<"
             or trimmed:sub(1, 5) == "404: "
             or trimmed:sub(1, 9) == "not found" then
             table.insert(failedFiles, relativePath .. " (HTML/error page)")
         else
-            addFile(relativePath, source)
-            downloaded = downloaded + 1
+            local chunk, compileErr = loadstring(source, "@remote/" .. relativePath)
+            if chunk then
+                addFile(relativePath, source)
+                downloaded = downloaded + 1
+            else
+                table.insert(failedFiles, relativePath .. " (Lua compile: " .. tostring(compileErr) .. ")")
+            end
         end
     else
         table.insert(failedFiles, relativePath)

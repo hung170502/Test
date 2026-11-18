@@ -548,6 +548,19 @@ function Movement.create(deps)
         onBypassPrepared = callback
     end
 
+    local function teleportTo(target)
+        local rootPart = getRootPart()
+
+        if not rootPart or typeof(target) ~= "Vector3" then
+            return false
+        end
+
+        prepareForServerAction()
+        rootPart.CFrame = CFrame.new(target.X, target.Y, target.Z)
+        zeroRootVelocity()
+        return true
+    end
+
     return {
         GetCharacter = getCharacter,
         GetRootPart = getRootPart,
@@ -557,6 +570,7 @@ function Movement.create(deps)
         PrepareBypass = prepareBypass,
         TweenTo = tweenTo,
         MoveToward = moveToward,
+        TeleportTo = teleportTo,
         WalkTo = walkTo,
         IsWalking = isWalking,
         IsWalkNear = isWalkNear,
@@ -576,6 +590,7 @@ function Movement.create(deps)
         IsTweeningTo = isTweeningTo,
         Reset = reset,
         SetBypassPreparedCallback = setBypassPreparedCallback,
+        TeleportTo = teleportTo,
     }
 end
 
