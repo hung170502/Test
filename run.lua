@@ -5,7 +5,7 @@
         loadstring(game:HttpGet("https://raw.githubusercontent.com/hung170502/Test/main/run.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/hung170502/Test/9dddb5589fe0bb75f9086ca46ab697db976a695e/"
+local BASE_URL = "https://raw.githubusercontent.com/hung170502/Test/37b6fc283e81461f027d2f7692285d1d0b07fc59/"
 
 local FILES = {
     "hub_loader.lua",
@@ -75,16 +75,33 @@ local function addFile(relativePath, source)
 end
 
 local downloaded = 0
+local failedFiles = {}
 for _, relativePath in ipairs(FILES) do
     local source = httpGet(BASE_URL .. relativePath)
+
     if typeof(source) == "string" and #source > 0 then
-        addFile(relativePath, source)
-        downloaded = downloaded + 1
+        local trimmed = source:gsub("^%s+", "")
+        local lower = trimmed:lower()
+        if lower:sub(1, 9) == "<!doctype"
+            or lower:sub(1, 5) == "<html"
+            or trimmed:sub(1, 5) == "404: "
+            or trimmed:sub(1, 9) == "not found" then
+            table.insert(failedFiles, relativePath .. " (HTML/error page)")
+        else
+            addFile(relativePath, source)
+            downloaded = downloaded + 1
+        end
+    else
+        table.insert(failedFiles, relativePath)
     end
 end
 
 if downloaded == 0 then
     error("[Hub] Could not download repository files. Check HttpGet access and the GitHub URL.", 0)
+end
+
+if #failedFiles > 0 then
+    warn("[Hub] Some remote files failed: " .. table.concat(failedFiles, ", "))
 end
 
 if not virtualFiles["hub_loader.lua"] then
