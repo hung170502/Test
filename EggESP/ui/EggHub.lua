@@ -199,6 +199,34 @@ function EggHub.create(deps)
         text(header, "Automation", 20, colors.text, UDim2.fromOffset(24, 10), UDim2.new(0.45, 0, 0, 26))
         text(header, "Steal An Egg", 11, colors.muted, UDim2.fromOffset(24, 36), UDim2.new(0.45, 0, 0, 16))
 
+        do
+            local draggingWindow = false
+            local dragStart = nil
+            local windowStart = nil
+
+            header.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    draggingWindow = true
+                    dragStart = input.Position
+                    windowStart = window.Position
+                    input.Changed:Connect(function()
+                        if input.UserInputState == Enum.UserInputState.End then
+                            draggingWindow = false
+                        end
+                    end)
+                end
+            end)
+
+            header.InputChanged:Connect(function(input)
+                if draggingWindow and input.UserInputType == Enum.UserInputType.MouseMovement and dragStart and windowStart then
+                    local delta = input.Position - dragStart
+                    pcall(function()
+                        window.Position = UDim2.new(windowStart.X.Scale, windowStart.X.Offset + delta.X, windowStart.Y.Scale, windowStart.Y.Offset + delta.Y)
+                    end)
+                end
+            end)
+        end
+
         local statusCard = Instance.new("Frame")
         statusCard.Name = "Status"
         statusCard.AnchorPoint = Vector2.new(1, 0.5)
@@ -559,6 +587,7 @@ function EggHub.create(deps)
         toggle(espSec, "Trap ESP", "Show traps", function() return runtime.showTraps == true end, function(v) runtime.showTraps = v end)
         toggle(espSec, "Trap Bounds", "Show trap boundaries", function() return runtime.showTrapBounds == true end, function(v) runtime.showTrapBounds = v end)
         toggle(espSec, "Avoid Own Traps", "Avoid own trap zones", function() return runtime.pathAvoidOwnTraps == true end, function(v) runtime.pathAvoidOwnTraps = v; if PathService then PathService.Invalidate() end end)
+        toggle(espSec, "Egg ESP", "Show field eggs and labels", function() return runtime.showEggs ~= false end, function(v) runtime.showEggs = v end)
 
         local misc = pageBuilders.pages.Misc
         local miscSec = section(misc, "MOVEMENT")

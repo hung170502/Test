@@ -863,12 +863,17 @@ function AutoFarm.create(deps)
                 end
 
                 setPhase(PHASE.WaitDeposit, "waiting for claim")
+                Movement.CancelMovement()
+                if Movement.EnsureLocomotion then
+                    Movement.EnsureLocomotion()
+                end
                 return
             end
 
             if atStandby then
                 setPhase(PHASE.WaitDeposit, "waiting for claim")
                 setServerActionMode(false)
+                Movement.CancelMovement()
                 if Movement.EnsureLocomotion then
                     Movement.EnsureLocomotion()
                 end

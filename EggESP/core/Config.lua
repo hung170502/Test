@@ -89,6 +89,7 @@ Config.Runtime = {
     showTreadmillBounds = true,
     showTraps = true,
     showTrapBounds = true,
+    showEggs = true,
     espRefreshInterval = 0.2,
     logicTickInterval = 0.15,
     hubStatusRefreshInterval = 1.5,

@@ -102,6 +102,7 @@ local EggData = EggDataModule.create(deps)
 local TreadmillData = TreadmillDataModule.create(deps)
 local TrapData = TrapDataModule.create(deps)
 local DataCollector = DataCollectorModule.create({
+    Config = Config,
     EggData = EggData,
     TreadmillData = TreadmillData,
     TrapData = TrapData,
@@ -292,6 +293,10 @@ local API = {
 
     SetShowTrapBounds = function(enabled)
         Config.Runtime.showTrapBounds = enabled == true
+    end,
+
+    SetShowEggs = function(enabled)
+        Config.Runtime.showEggs = enabled ~= false
     end,
 
     SetTreadmillBoundsMeters = function(scale)

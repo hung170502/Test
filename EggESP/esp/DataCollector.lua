@@ -5,6 +5,7 @@
 local DataCollector = {}
 
 function DataCollector.create(deps)
+    local Config = deps.Config
     local EggData = deps.EggData
     local TreadmillData = deps.TreadmillData
     local TrapData = deps.TrapData
@@ -22,7 +23,9 @@ function DataCollector.create(deps)
         end
 
         for _, egg in ipairs(EggData.Collect()) do
-            table.insert(results, egg)
+            if not Config or not Config.Runtime or Config.Runtime.showEggs ~= false then
+                table.insert(results, egg)
+            end
         end
 
         return results
