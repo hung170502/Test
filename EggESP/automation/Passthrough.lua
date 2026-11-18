@@ -14,6 +14,7 @@ function Passthrough.create(deps)
 
     local saved = {}
     local active = false
+    local missingReported = {}
 
     local function resolvePath(path)
         local current = Workspace
@@ -80,7 +81,8 @@ function Passthrough.create(deps)
 
             if instance then
                 applyToInstance(instance)
-            else
+            elseif not missingReported[path] then
+                missingReported[path] = true
                 warn("[EggESP] Passthrough target not found: " .. path)
             end
         end

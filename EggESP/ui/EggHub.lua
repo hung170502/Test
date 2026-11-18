@@ -741,7 +741,6 @@ function EggHub.create(deps)
 
         local right = section(steal, "FILTER", UDim2.new(0.5, -8, 0, 0))
         right.Position = UDim2.new(0.5, 8, 0, 0)
-        methodButton(right, "Filter Zones", {"Alien", "Cherry Blossom", "Titan Temple", "Light Dark", "Enchanted Forest", "Cosmic", "Stormlands", "Prehistoric", "Abyss Ocean", "Volcano", "Snow", "Jungle", "Desert", "Lake", "Forest"}, function() return "All Zones" end, function(v) warn("[FIGGY] Zone filter placeholder: " .. tostring(v)) end)
         methodButton(right, "Steal First", {"Best value", "Lowest value", "Best rarity", "Best mutation", "Biggest", "Closest"}, function() return "Highest Earnings" end, function(v) runtime.autoFarmPriority = v end)
         multiSelect(right, "Mutations", {"None", "Silver", "Rainbow", "Golden"}, function()
             local values = runtime.uiMutationSelection or {}
@@ -777,8 +776,33 @@ function EggHub.create(deps)
         if FarmFilters and FarmFilters.GetRarityOptions then
             local raritySection = section(right, "MIN VALUE PER RARITY", UDim2.new(1, 0, 0, 0))
             for _, option in ipairs(FarmFilters.GetRarityOptions()) do
-                toggle(raritySection, option.label or option.key, "0 means no minimum", function() return false end, function(_) warn("[FIGGY] Per-rarity minimum API is not implemented") end)
+                slider(raritySection, tostring(option.label or option.key), function()
+                    local values = runtime.autoFarmRarityMinimums or {}
+                    return values[option.key] or 0
+                end, function(value)
+                    runtime.autoFarmRarityMinimums = runtime.autoFarmRarityMinimums or {}
+                    runtime.autoFarmRarityMinimums[option.key] = value
+                end, 0, 2000, 25, "/s")
             end
+        end
+
+        if FarmFilters and FarmFilters.GetZoneOptions then
+            local zoneOptions = {}
+            for _, option in ipairs(FarmFilters.GetZoneOptions()) do
+                table.insert(zoneOptions, option.label or option.id)
+            end
+            multiSelect(right, "Filter Zones", zoneOptions, function()
+                return runtime.uiZoneSelection or {}
+            end, function(values)
+                runtime.uiZoneSelection = values
+                for _, option in ipairs(FarmFilters.GetZoneOptions()) do
+                    local label = option.label or option.id
+                    if values[label] ~= nil then
+                        FarmFilters.SetZoneEnabled(option.id, values[label] == true)
+                    end
+                end
+                if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+            end)
         end
 
         local autoHop = pageBuilders.pages.AutoHop

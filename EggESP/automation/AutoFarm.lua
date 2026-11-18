@@ -64,6 +64,7 @@ function AutoFarm.create(deps)
         wasDayBlocked = false,
         rushFarmAfterDay = false,
         movementTrustRetryAt = 0,
+        lastPickupAttemptAt = 0,
     }
 
     local function compareEggPriority(a, b)
@@ -709,6 +710,12 @@ function AutoFarm.create(deps)
             return false
         end
 
+        local now = os.clock()
+        if (state.lastPickupAttemptAt or 0) > now - 0.5 then
+            return false
+        end
+        state.lastPickupAttemptAt = now
+
         local slotKey = resolveSlotKey(egg.record)
         local callOk, ok, reason = pcall(function()
             return EggState.CarryFieldEgg(egg.record.Uid, slotKey)
@@ -797,6 +804,13 @@ function AutoFarm.create(deps)
             end
 
             return false
+        end
+
+        if (state.movementTrustRetryAt or 0) > os.clock() then
+            setPhase(PHASE.Pickup, "syncing movement trust")
+            if Movement.EnsureLocomotion then Movement.EnsureLocomotion() end
+            if Movement.PrepareForServerAction then Movement.PrepareForServerAction() end
+            return
         end
 
         egg = refreshEggPosition(egg)
