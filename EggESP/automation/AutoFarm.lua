@@ -63,6 +63,7 @@ function AutoFarm.create(deps)
         farmStartedAt = 0,
         wasDayBlocked = false,
         rushFarmAfterDay = false,
+        movementTrustRetryAt = 0,
     }
 
     local function compareEggPriority(a, b)
@@ -709,7 +710,14 @@ function AutoFarm.create(deps)
         end
 
         local slotKey = resolveSlotKey(egg.record)
-        local ok, reason = EggState.CarryFieldEgg(egg.record.Uid, slotKey)
+        local callOk, ok, reason = pcall(function()
+            return EggState.CarryFieldEgg(egg.record.Uid, slotKey)
+        end)
+
+        if not callOk then
+            reason = tostring(ok)
+            ok = false
+        end
 
         if ok == true then
             setServerActionMode(false)
@@ -725,6 +733,16 @@ function AutoFarm.create(deps)
 
         if reason then
             state.detail = string.format("denied: %s", reason)
+
+            if tostring(reason):lower():find("not currently trusted", 1, true) then
+                state.movementTrustRetryAt = os.clock() + 1.5
+                state.pickupSettleTicks = 0
+                state.pickupFailCount = 0
+                if Movement.PrepareForServerAction then
+                    Movement.PrepareForServerAction()
+                end
+                return false
+            end
         end
 
         state.pickupSettleTicks = 0
