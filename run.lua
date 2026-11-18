@@ -5,7 +5,7 @@
         loadstring(game:HttpGet("https://raw.githubusercontent.com/hung170502/Test/main/run.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/hung170502/Test/main/"
+local BASE_URL = "https://raw.githubusercontent.com/hung170502/Test/9dddb5589fe0bb75f9086ca46ab697db976a695e/"
 
 local FILES = {
     "hub_loader.lua",
@@ -50,18 +50,17 @@ local FILES = {
 local genv = (type(getgenv) == "function" and getgenv()) or _G
 local virtualFiles = {}
 
-local cacheToken = tostring(os.time())
+local cacheToken = nil
 
 local function httpGet(url)
-    local cachedUrl = url .. "?cache=" .. cacheToken
     if game ~= nil then
-        local ok, body = pcall(function() return game:HttpGet(cachedUrl) end)
+        local ok, body = pcall(function() return game:HttpGet(url) end)
         if ok and typeof(body) == "string" and #body > 0 then
             return body
         end
     end
     if type(httpget) == "function" then
-        local ok, body = pcall(httpget, cachedUrl)
+        local ok, body = pcall(httpget, url)
         if ok and typeof(body) == "string" and #body > 0 then
             return body
         end
@@ -94,6 +93,7 @@ end
 
 local originalReadfile = rawget(genv, "readfile") or readfile
 local originalLoadfile = rawget(genv, "loadfile") or loadfile
+local originalIsfile = rawget(genv, "isfile") or isfile
 
 local function normalizePath(path)
     path = tostring(path):gsub("\\\\", "/")
@@ -141,7 +141,7 @@ rawset(genv, "readfile", virtualReadfile)
 rawset(genv, "loadfile", virtualLoadfile)
 rawset(genv, "isfile", function(path)
     if findVirtual(path) then return true end
-    if type(isfile) == "function" then return isfile(path) end
+    if type(originalIsfile) == "function" then return originalIsfile(path) end
     return false
 end)
 
