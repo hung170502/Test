@@ -234,6 +234,7 @@ local Hub = EggHubModule.create({
     InventoryManager = InventoryManager,
     PetAutomation = PetAutomation,
     LocalPlayer = deps.LocalPlayer,
+    Movement = Movement,
 })
 
 if Hub.AttachKeybind then

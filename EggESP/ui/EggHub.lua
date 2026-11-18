@@ -16,6 +16,7 @@ function EggHub.create(deps)
     local InventoryManager = deps.InventoryManager
     local PetAutomation = deps.PetAutomation
     local LocalPlayer = deps.LocalPlayer or game:GetService("Players").LocalPlayer
+    local Movement = deps.Movement
 
     local runtime = Config.Runtime
     local callbacks = {}
@@ -196,8 +197,88 @@ function EggHub.create(deps)
         header.BorderSizePixel = 0
         header.Parent = content
 
-        text(header, "Automation", 20, colors.text, UDim2.fromOffset(24, 10), UDim2.new(0.45, 0, 0, 26))
-        text(header, "Steal An Egg", 11, colors.muted, UDim2.fromOffset(24, 36), UDim2.new(0.45, 0, 0, 16))
+        text(header, "VENYX", 20, colors.text, UDim2.fromOffset(24, 10), UDim2.new(0.45, 0, 0, 26))
+        text(header, "Steal An Egg · v1.19", 11, colors.muted, UDim2.fromOffset(24, 36), UDim2.new(0.45, 0, 0, 16))
+
+        local search = Instance.new("TextBox")
+        search.Name = "Search"
+        search.AnchorPoint = Vector2.new(1, 0.5)
+        search.Position = UDim2.new(1, -92, 0.5, 0)
+        search.Size = UDim2.fromOffset(190, 34)
+        search.BackgroundColor3 = colors.panel2
+        search.BorderSizePixel = 0
+        search.PlaceholderText = "Search"
+        search.Text = ""
+        search.Font = Enum.Font.GothamSemibold
+        search.TextSize = 12
+        search.TextColor3 = colors.text
+        search.PlaceholderColor3 = colors.muted
+        search.ClearTextOnFocus = false
+        corner(search, 8)
+        stroke(search, colors.border, 1, 0.5)
+        search.Parent = header
+
+        search:GetPropertyChangedSignal("Text"):Connect(function()
+            local query = tostring(search.Text):lower()
+            for _, page in pairs(pageBuilders.pages or {}) do
+                if page:IsA("ScrollingFrame") then
+                    for _, descendant in ipairs(page:GetDescendants()) do
+                        if descendant:IsA("TextButton") or descendant:IsA("Frame") then
+                            local height = descendant.AbsoluteSize.Y
+                            if height >= 58 and height <= 68 then
+                                local found = ""
+                                for _, child in ipairs(descendant:GetChildren()) do
+                                    if child:IsA("TextLabel") then
+                                        found = found .. " " .. child.Text
+                                    end
+                                end
+                                descendant.Visible = query == "" or found:lower():find(query, 1, true) ~= nil
+                            end
+                        end
+                    end
+                end
+            end
+        end)
+
+        local minimize = Instance.new("TextButton")
+        minimize.AnchorPoint = Vector2.new(1, 0.5)
+        minimize.Position = UDim2.new(1, -54, 0.5, 0)
+        minimize.Size = UDim2.fromOffset(30, 30)
+        minimize.BackgroundColor3 = colors.panel2
+        minimize.BorderSizePixel = 0
+        minimize.Text = "—"
+        minimize.Font = Enum.Font.GothamBold
+        minimize.TextSize = 13
+        minimize.TextColor3 = colors.text
+        minimize.Parent = header
+        corner(minimize, 8)
+        minimize.Activated:Connect(function()
+            runWithPluginIdentity(function()
+                window.Visible = false
+                visible = false
+                runtime.hubVisible = false
+            end)
+        end)
+
+        local close = Instance.new("TextButton")
+        close.AnchorPoint = Vector2.new(1, 0.5)
+        close.Position = UDim2.new(1, -16, 0.5, 0)
+        close.Size = UDim2.fromOffset(30, 30)
+        close.BackgroundColor3 = colors.panel2
+        close.BorderSizePixel = 0
+        close.Text = "×"
+        close.Font = Enum.Font.GothamBold
+        close.TextSize = 16
+        close.TextColor3 = colors.text
+        close.Parent = header
+        corner(close, 8)
+        close.Activated:Connect(function()
+            runWithPluginIdentity(function()
+                window.Visible = false
+                visible = false
+                runtime.hubVisible = false
+            end)
+        end)
 
         do
             local draggingWindow = false
@@ -230,33 +311,15 @@ function EggHub.create(deps)
         local statusCard = Instance.new("Frame")
         statusCard.Name = "Status"
         statusCard.AnchorPoint = Vector2.new(1, 0.5)
-        statusCard.Position = UDim2.new(1, -62, 0.5, 0)
-        statusCard.Size = UDim2.new(0, 430, 0, 48)
+        statusCard.Position = UDim2.new(1, -300, 0.5, 0)
+        statusCard.Size = UDim2.fromOffset(190, 38)
         statusCard.BackgroundColor3 = colors.panel2
         statusCard.BorderSizePixel = 0
         statusCard.Parent = header
-        corner(statusCard, 10)
+        corner(statusCard, 8)
 
-        local statusText = text(statusCard, "Loading status...", 11, colors.muted, UDim2.fromOffset(14, 0), UDim2.new(1, -28, 1, 0))
+        local statusText = text(statusCard, "Loading status...", 10, colors.muted, UDim2.fromOffset(12, 0), UDim2.new(1, -24, 1, 0))
         statusText.TextWrapped = true
-
-        local close = Instance.new("TextButton")
-        close.Position = UDim2.new(1, -48, 0, 18)
-        close.Size = UDim2.fromOffset(30, 30)
-        close.BackgroundColor3 = colors.panel2
-        close.Text = "×"
-        close.Font = Enum.Font.GothamBold
-        close.TextSize = 18
-        close.TextColor3 = colors.text
-        close.Parent = header
-        corner(close, 8)
-        close.Activated:Connect(function()
-            runWithPluginIdentity(function()
-                runtime.hubVisible = false
-                visible = false
-                window.Visible = false
-            end)
-        end)
 
         local pages = Instance.new("Frame")
         pages.Name = "Pages"
@@ -272,12 +335,11 @@ function EggHub.create(deps)
         nav.Parent = sidebar
 
         local tabs = {
-            {id = "Eggs", label = "Eggs", icon = "◉"},
-            {id = "Filters", label = "Filters", icon = "≡"},
-            {id = "Manage", label = "Manage", icon = "▦"},
-            {id = "Pet", label = "Pet", icon = "♙"},
-            {id = "ESP", label = "Visuals", icon = "◈"},
-            {id = "Misc", label = "Misc", icon = "⚙"},
+            {id = "Home", label = "Home", icon = "⌂"},
+            {id = "Steal", label = "Steal", icon = "◉"},
+            {id = "AutoHop", label = "Auto Hop", icon = "⇄"},
+            {id = "Player", label = "Player", icon = "♙"},
+            {id = "Settings", label = "Settings", icon = "⚙"},
         }
 
         local activePage
@@ -294,15 +356,15 @@ function EggHub.create(deps)
             local button = Instance.new("TextButton")
             button.Position = UDim2.fromOffset(0, (index - 1) * 58)
             button.Size = UDim2.new(1, 0, 0, 48)
-            button.BackgroundColor3 = tab.id == "Eggs" and colors.accent or colors.panel2
-            button.BackgroundTransparency = tab.id == "Eggs" and 0 or 0.45
+            button.BackgroundColor3 = tab.id == "Steal" and colors.accent or colors.panel2
+            button.BackgroundTransparency = tab.id == "Steal" and 0 or 0.45
             button.BorderSizePixel = 0
             button.Text = ""
             button.Parent = nav
             corner(button, 10)
 
             text(button, tab.icon, 16, colors.text, UDim2.fromOffset(14, 0), UDim2.fromOffset(28, 48))
-            text(button, tab.label, 13, tab.id == "Eggs" and colors.text or colors.muted, UDim2.fromOffset(44, 0), UDim2.new(1, -48, 1, 0))
+            text(button, tab.label, 13, tab.id == "Steal" and colors.text or colors.muted, UDim2.fromOffset(44, 0), UDim2.new(1, -48, 1, 0))
 
             button.Activated:Connect(function()
                 runWithPluginIdentity(function()
@@ -336,7 +398,7 @@ function EggHub.create(deps)
             page.BorderSizePixel = 0
             page.ScrollBarThickness = 4
             page.ScrollBarImageColor3 = colors.accent
-            page.Visible = tab.id == "Eggs"
+            page.Visible = tab.id == "Steal"
             page.CanvasSize = UDim2.fromOffset(0, 0)
             page.AutomaticCanvasSize = Enum.AutomaticSize.Y
             page.Parent = pages
@@ -542,91 +604,219 @@ function EggHub.create(deps)
         return b
     end
 
-    function buildPages()
-        local eggs = pageBuilders.pages.Eggs
-        local left = section(eggs, "AUTO STEAL", UDim2.new(0.5, -8, 0, 0))
-        left.Position = UDim2.fromOffset(0, 0)
+    local function multiSelect(parent, title, options, getValues, setValues)
+        local row = Instance.new("TextButton")
+        row.Size = UDim2.new(1, 0, 0, 58)
+        row.BackgroundColor3 = colors.panel2
+        row.BorderSizePixel = 0
+        row.Text = ""
+        row.AutoButtonColor = false
+        row.Parent = parent
+        corner(row, 9)
 
-        toggle(left, "Auto Steal", "Farm and return eggs automatically", function() return runtime.autoFarmEnabled == true end, function(enabled)
-            runtime.autoFarmEnabled = enabled
-            if enabled and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart() else if not enabled and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end end
+        text(row, title, 12, colors.text, UDim2.fromOffset(14, 8), UDim2.new(0.55, 0, 0, 20))
+        local valueLabel = text(row, "0 selected", 11, colors.accent, UDim2.new(0.55, 0, 0, 0), UDim2.new(0.45, -14, 1, 0))
+        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
+
+        local open = false
+        local menu
+
+        local function refresh()
+            local values = getValues() or {}
+            local count = 0
+            for _ in pairs(values) do count = count + 1 end
+            valueLabel.Text = count == 0 and "All" or tostring(count) .. " selected"
+        end
+
+        row.Activated:Connect(function()
+            runWithPluginIdentity(function()
+                open = not open
+                if menu then menu:Destroy() menu = nil end
+                if not open then refresh() return end
+
+                menu = Instance.new("Frame")
+                menu.Name = title .. "Menu"
+                menu.AnchorPoint = Vector2.new(1, 0)
+                menu.Position = UDim2.new(1, -6, 1, 6)
+                menu.Size = UDim2.fromOffset(math.min(220, row.AbsoluteSize.X), math.max(44 * #options, 44))
+                menu.BackgroundColor3 = colors.panel
+                menu.BorderSizePixel = 0
+                menu.ZIndex = 30
+                menu.Parent = row
+                corner(menu, 8)
+                stroke(menu, colors.border, 1, 0.2)
+
+                local layout = Instance.new("UIListLayout")
+                layout.Padding = UDim.new(0, 4)
+                layout.SortOrder = Enum.SortOrder.LayoutOrder
+                layout.Parent = menu
+
+                local pad = Instance.new("UIPadding")
+                pad.PaddingTop = UDim.new(0, 6)
+                pad.PaddingBottom = UDim.new(0, 6)
+                pad.PaddingLeft = UDim.new(0, 6)
+                pad.PaddingRight = UDim.new(0, 6)
+                pad.Parent = menu
+
+                for _, option in ipairs(options) do
+                    local item = Instance.new("TextButton")
+                    item.Size = UDim2.new(1, 0, 0, 36)
+                    item.BackgroundColor3 = colors.panel2
+                    item.BorderSizePixel = 0
+                    item.Text = ""
+                    item.ZIndex = 31
+                    item.Parent = menu
+                    corner(item, 6)
+
+                    local selected = getValues()[option] == true
+                    local dot = Instance.new("Frame")
+                    dot.Position = UDim2.new(0, 10, 0.5, -7)
+                    dot.Size = UDim2.fromOffset(14, 14)
+                    dot.BackgroundColor3 = selected and colors.accent or Color3.fromRGB(58, 62, 88)
+                    dot.BorderSizePixel = 0
+                    dot.ZIndex = 32
+                    dot.Parent = item
+                    corner(dot, 7)
+                    text(item, option, 12, colors.text, UDim2.fromOffset(34, 0), UDim2.new(1, -40, 1, 0)).ZIndex = 32
+
+                    item.Activated:Connect(function()
+                        local values = getValues() or {}
+                        values[option] = not (values[option] == true)
+                        setValues(values)
+                        dot.BackgroundColor3 = values[option] and colors.accent or Color3.fromRGB(58, 62, 88)
+                        refresh()
+                    end)
+                end
+            end)
         end)
-        toggle(left, "Wait For Day", "Pause while night reset is active", function() return runtime.waitForDayBeforeFarm ~= false end, function(v) runtime.waitForDayBeforeFarm = v end)
-        toggle(left, "Mutant Only", "Only target mutant eggs", function() return runtime.autoFarmMutantOnly == true end, function(v) runtime.autoFarmMutantOnly = v; if EggData then EggData.InvalidateCache() end end)
-        toggle(left, "Infested First", "Prioritize parasite eggs", function() return runtime.autoFarmInfestedFirst ~= false end, function(v) runtime.autoFarmInfestedFirst = v end)
-        toggle(left, "Anti Guard", "Use guard-zone walking behavior", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v; if PathService then PathService.Invalidate() end end)
-        slider(left, "Tween Speed", function() return runtime.tweenSpeed or 700 end, function(v) runtime.tweenSpeed = v end, 300, 1000, 50, "")
-        slider(left, "Pickup Speed", function() return runtime.pickupSyncWalkSpeed or 28 end, function(v) runtime.pickupSyncWalkSpeed = v end, 16, 60, 2, "")
-        slider(left, "Pickup Settling", function() return runtime.pickupSyncSettleTicks or 8 end, function(v) runtime.pickupSyncSettleTicks = v end, 4, 20, 1, " ticks")
-        button(left, "Set Standby Here", "Use your current position", function()
+
+        refresh()
+        return row
+    end
+
+    local function buildPages()
+        local home = pageBuilders.pages.Home
+        local homeLeft = section(home, "OVERVIEW", UDim2.new(0.5, -8, 0, 0))
+        homeLeft.Position = UDim2.fromOffset(0, 0)
+        button(homeLeft, "Start Auto Steal", "Start the configured auto-farm workflow", function()
+            runtime.autoFarmEnabled = true
+            if callbacks.onAutoFarmStart then callbacks.onAutoFarmStart() end
+        end)
+        button(homeLeft, "Stop Auto Steal", "Stop movement and automation", function()
+            runtime.autoFarmEnabled = false
+            if callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
+        end)
+
+        local homeRight = section(home, "STATUS", UDim2.new(0.5, -8, 0, 0))
+        homeRight.Position = UDim2.new(0.5, 8, 0, 0)
+        toggle(homeRight, "Automation", "Enable the selected workflow", function() return runtime.autoFarmEnabled == true end, function(v)
+            runtime.autoFarmEnabled = v
+            if v and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart()
+            elseif not v and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
+        end)
+
+        local steal = pageBuilders.pages.Steal
+        local stealLayout = Instance.new("UIListLayout")
+        stealLayout.FillDirection = Enum.FillDirection.Horizontal
+        stealLayout.Padding = UDim.new(0, 16)
+        stealLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        stealLayout.Parent = steal
+
+        local left = section(steal, "AUTO STEAL", UDim2.new(0.5, -8, 0, 0))
+        left.Position = UDim2.fromOffset(0, 0)
+        toggle(left, "Auto Steal", "Auto farm and return eggs", function() return runtime.autoFarmEnabled == true end, function(v)
+            runtime.autoFarmEnabled = v
+            if v and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart()
+            elseif not v and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
+        end)
+        methodButton(left, "Move to Egg", {"Teleport", "Walk"}, function() return runtime.moveToEggMethod or "Teleport" end, function(v) runtime.moveToEggMethod = v end)
+        methodButton(left, "Delivery Method", {"Fast Tween", "Quick Steps"}, function() return runtime.deliveryMethod or "Fast Tween" end, function(v) runtime.deliveryMethod = v end)
+        methodButton(left, "Teleport Zones", {"Volcano", "Alien", "Cherry Blossom", "Titan Temple", "Light Dark", "Enchanted Forest"}, function() return "Steal First" end, function() warn("[FIGGY] Teleport zone routing is a placeholder") end)
+        toggle(left, "Steal Missing Index Eggs", "Placeholder: no confirmed game API", function() return false end, function(_) warn("[FIGGY] Missing-index egg mode has no confirmed game API") end)
+        toggle(left, "Steal from Other Players", "Placeholder: server action API required", function() return false end, function(_) warn("[FIGGY] Player stealing API is not implemented") end)
+        toggle(left, "Anti Guard", "Use guard-zone movement", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v; if PathService then PathService.Invalidate() end end)
+        toggle(left, "Drop Eggs at Safe Zone", "Placeholder until safe-zone API is confirmed", function() return false end, function(_) warn("[FIGGY] Safe-zone dropping API is not implemented") end)
+
+        local right = section(steal, "FILTER", UDim2.new(0.5, -8, 0, 0))
+        right.Position = UDim2.new(0.5, 8, 0, 0)
+        methodButton(right, "Filter Zones", {"Alien", "Cherry Blossom", "Titan Temple", "Light Dark", "Enchanted Forest", "Cosmic", "Stormlands", "Prehistoric", "Abyss Ocean", "Volcano", "Snow", "Jungle", "Desert", "Lake", "Forest"}, function() return "All Zones" end, function(v) warn("[FIGGY] Zone filter placeholder: " .. tostring(v)) end)
+        methodButton(right, "Steal First", {"Best value", "Lowest value", "Best rarity", "Best mutation", "Biggest", "Closest"}, function() return "Highest Earnings" end, function(v) runtime.autoFarmPriority = v end)
+        multiSelect(right, "Mutations", {"None", "Silver", "Rainbow", "Golden"}, function()
+            local values = runtime.uiMutationSelection or {}
+            return values
+        end, function(values)
+            runtime.uiMutationSelection = values
+            runtime.autoFarmMutantOnly = values.Mutant == true
+            runtime.autoFarmInfestedOnly = values.Infested == true
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+        multiSelect(right, "Rarities", {"Divine", "Enternal", "Secret", "Cosmic", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common"}, function()
+            local values = runtime.uiRaritySelection or {}
+            return values
+        end, function(values)
+            runtime.uiRaritySelection = values
+            if FarmFilters and FarmFilters.SetRarityEnabled then
+                for key, enabled in pairs(values) do
+                    for _, option in ipairs(FarmFilters.GetRarityOptions and FarmFilters.GetRarityOptions() or {}) do
+                        if tostring(option.label or option.key):lower():find(key:lower(), 1, true) then
+                            FarmFilters.SetRarityEnabled(option.key, enabled)
+                        end
+                    end
+                end
+            end
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+        methodButton(right, "Only These Eggs", {"Any Egg", "Selected Eggs"}, function() return "Any Egg" end, function(v) warn("[FIGGY] Egg-name whitelist placeholder: " .. tostring(v)) end)
+        slider(right, "Min Value/s", function() return runtime.autoFarmMinValuePerSecond or 0 end, function(v) runtime.autoFarmMinValuePerSecond = v end, 0, 2000, 25, "/s")
+        slider(right, "Min KG", function() return runtime.autoFarmMinWeight or 0 end, function(v) runtime.autoFarmMinWeight = v end, 0, 200, 5, " kg")
+        toggle(right, "Sell Cheapest Egg When Bag Is Full", "Placeholder until sell policy is selected", function() return runtime.autoSellEnabled == true end, function(v) runtime.autoSellEnabled = v end)
+        slider(right, "Only Below /s", function() return runtime.autoFarmBelowValuePerSecond or 0 end, function(v) runtime.autoFarmBelowValuePerSecond = v end, 0, 2000, 25, "/s")
+
+        if FarmFilters and FarmFilters.GetRarityOptions then
+            local raritySection = section(right, "MIN VALUE PER RARITY", UDim2.new(1, 0, 0, 0))
+            for _, option in ipairs(FarmFilters.GetRarityOptions()) do
+                toggle(raritySection, option.label or option.key, "0 means no minimum", function() return false end, function(_) warn("[FIGGY] Per-rarity minimum API is not implemented") end)
+            end
+        end
+
+        local autoHop = pageBuilders.pages.AutoHop
+        local hopLeft = section(autoHop, "AUTO HOP", UDim2.new(0.5, -8, 0, 0))
+        hopLeft.Position = UDim2.fromOffset(0, 0)
+        toggle(hopLeft, "Enable Auto Hop", "Placeholder until TeleportService server logic is confirmed", function() return runtime.autoHopEnabled == true end, function(v) runtime.autoHopEnabled = v end)
+        slider(hopLeft, "Delay", function() return runtime.autoHopDelay or 30 end, function(v) runtime.autoHopDelay = v end, 5, 300, 5, " sec")
+        button(hopLeft, "Start", "Start Auto Hop placeholder", function() warn("[FIGGY] Auto Hop Start requires confirmed TeleportService logic") end)
+        button(hopLeft, "Stop", "Stop Auto Hop placeholder", function() runtime.autoHopEnabled = false end)
+
+        local hopRight = section(autoHop, "SERVER RULES", UDim2.new(0.5, -8, 0, 0))
+        hopRight.Position = UDim2.new(0.5, 8, 0, 0)
+        methodButton(hopRight, "Hop Mode", {"Lowest Player Count", "Same Region", "Random Server"}, function() return "Lowest Player Count" end, function(v) warn("[FIGGY] Hop mode placeholder: " .. tostring(v)) end)
+
+        local player = pageBuilders.pages.Player
+        local playerSection = section(player, "PLAYER", UDim2.new(1, 0, 0, 0))
+        button(playerSection, "Set Standby Here", "Use the local HumanoidRootPart position", function()
             local character = LocalPlayer.Character
             local root = character and character:FindFirstChild("HumanoidRootPart")
             if root then runtime.standbyPosition = root.Position; if PathService then PathService.Invalidate() end end
         end)
-
-        local right = section(eggs, "FILTERS", UDim2.new(0.5, -8, 0, 0))
-        right.Position = UDim2.new(0.5, 8, 0, 0)
-        toggle(right, "Strict Filter", "Only use selected rarities and zones", function() return runtime.autoFarmFilterWhitelist ~= false end, function(v) runtime.autoFarmFilterWhitelist = v end)
-        toggle(right, "Infested Only", "Ignore eggs without parasite", function() return runtime.autoFarmInfestedOnly == true end, function(v) runtime.autoFarmInfestedOnly = v end)
-        slider(right, "Max Distance", function() return runtime.maxDistance or 200 end, function(v) runtime.maxDistance = v end, 50, 500, 10, " studs")
-
-        local eggsLayout = Instance.new("UIListLayout")
-        eggsLayout.FillDirection = Enum.FillDirection.Horizontal
-        eggsLayout.Padding = UDim.new(0, 16)
-        eggsLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        eggsLayout.Parent = eggs
-
-        local filters = pageBuilders.pages.Filters
-        if FarmFilters and FarmFilters.GetRarityOptions then
-            local rarity = section(filters, "RARITIES")
-            local list = FarmFilters.GetRarityOptions()
-            table.sort(list, function(a, b) return (a.tier or 0) > (b.tier or 0) end)
-            for _, option in ipairs(list) do
-                toggle(rarity, option.label or option.key, "Rarity filter", function() return FarmFilters.GetRarityEnabled(option.key) end, function(v) FarmFilters.SetRarityEnabled(option.key, v); if EggData then EggData.InvalidateCache() end end)
-            end
-        end
-        if FarmFilters and FarmFilters.GetZoneOptions then
-            local zones = section(filters, "ZONES")
-            for _, option in ipairs(FarmFilters.GetZoneOptions()) do
-                toggle(zones, option.label or option.id, "Zone filter", function() return FarmFilters.GetZoneEnabled(option.id) end, function(v) FarmFilters.SetZoneEnabled(option.id, v); if EggData then EggData.InvalidateCache() end end)
-            end
-        end
-
-        local manage = pageBuilders.pages.Manage
-        local inv = section(manage, "INVENTORY")
-        toggle(inv, "Manage Inventory", "Place or sell eggs when inventory is full", function() return runtime.autoPlaceEnabled ~= false or runtime.autoSellEnabled == true end, function(v)
-            if v then runtime.autoPlaceEnabled = true; if InventoryManager then InventoryManager.Start() end else if InventoryManager then InventoryManager.Stop() end end
+        toggle(playerSection, "Walk Guard Zone", "Use slower guard-zone movement", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v end)
+        slider(playerSection, "Tween Speed", function() return runtime.tweenSpeed or 700 end, function(v) runtime.tweenSpeed = v end, 300, 1000, 50, "")
+        button(playerSection, "Reset Character Motion", "Cancel active tween and walking", function()
+            if Movement and Movement.Reset then Movement.Reset() end
         end)
-        toggle(inv, "Auto Place", "Place unplaced eggs on the plot", function() return runtime.autoPlaceEnabled ~= false end, function(v) runtime.autoPlaceEnabled = v end)
-        toggle(inv, "Auto Sell", "Sell selected egg rarities", function() return runtime.autoSellEnabled == true end, function(v) runtime.autoSellEnabled = v end)
-        toggle(inv, "Dump Worst Eggs", "Sell a batch of low-priority eggs", function() return runtime.autoDumpWorstEggsEnabled ~= false end, function(v) runtime.autoDumpWorstEggsEnabled = v end)
-        slider(inv, "Place Batch", function() return runtime.autoPlaceBatchSize or 5 end, function(v) runtime.autoPlaceBatchSize = v end, 1, 20, 1, "")
-        slider(inv, "Place Interval", function() return runtime.autoPlaceInterval or 60 end, function(v) runtime.autoPlaceInterval = v end, 10, 600, 10, " sec")
-        slider(inv, "Worst Egg Count", function() return runtime.autoDumpWorstEggCount or 10 end, function(v) runtime.autoDumpWorstEggCount = v end, 1, 50, 1, "")
 
-        local pet = pageBuilders.pages.Pet
-        local petSec = section(pet, "PET AUTOMATION")
-        toggle(petSec, "Pet Care", "Master pet automation switch", function() return runtime.autoPetCareEnabled ~= false end, function(v) runtime.autoPetCareEnabled = v end)
-        toggle(petSec, "Auto Hatch", "Open ready eggs", function() return runtime.autoHatchEnabled ~= false end, function(v) runtime.autoHatchEnabled = v end)
-        toggle(petSec, "Auto Equip Best", "Equip the strongest pets", function() return runtime.autoEquipBest ~= false end, function(v) runtime.autoEquipBest = v end)
-        toggle(petSec, "Auto Fuse", "Fuse duplicate pets", function() return runtime.autoFuseEnabled ~= false end, function(v) runtime.autoFuseEnabled = v end)
+        local settings = pageBuilders.pages.Settings
+        local settingsLeft = section(settings, "DISPLAY", UDim2.new(0.5, -8, 0, 0))
+        settingsLeft.Position = UDim2.fromOffset(0, 0)
+        methodButton(settingsLeft, "Theme", {"Dark", "Midnight", "System"}, function() return runtime.uiTheme or "Dark" end, function(v) runtime.uiTheme = v end)
+        methodButton(settingsLeft, "Language", {"English", "Vietnamese"}, function() return runtime.uiLanguage or "English" end, function(v) runtime.uiLanguage = v end)
+        slider(settingsLeft, "UI Scale", function() return runtime.uiScale or 100 end, function(v) runtime.uiScale = v end, 75, 125, 5, "%")
+        toggle(settingsLeft, "FPS Display", "Placeholder performance display", function() return runtime.showFps == true end, function(v) runtime.showFps = v end)
+        toggle(settingsLeft, "Performance Mode", "Reduce UI refresh work", function() return runtime.performanceMode == true end, function(v) runtime.performanceMode = v end)
 
-        local pen = section(pet, "BASE PEN")
-        toggle(pen, "Auto Upgrade", "Buy the next base tier", function() return runtime.autoUpgradeBasePen ~= false end, function(v) runtime.autoUpgradeBasePen = v end)
-        toggle(pen, "Auto Collect", "Collect pen and offline money", function() return runtime.autoCollectPenMoney ~= false end, function(v) runtime.autoCollectPenMoney = v end)
-
-        local esp = pageBuilders.pages.ESP
-        local espSec = section(esp, "VISUALS")
-        toggle(espSec, "Treadmill ESP", "Show treadmills", function() return runtime.showTreadmill == true end, function(v) runtime.showTreadmill = v end)
-        toggle(espSec, "Treadmill Bounds", "Show treadmill boundaries", function() return runtime.showTreadmillBounds == true end, function(v) runtime.showTreadmillBounds = v end)
-        toggle(espSec, "Trap ESP", "Show traps", function() return runtime.showTraps == true end, function(v) runtime.showTraps = v end)
-        toggle(espSec, "Trap Bounds", "Show trap boundaries", function() return runtime.showTrapBounds == true end, function(v) runtime.showTrapBounds = v end)
-        toggle(espSec, "Avoid Own Traps", "Avoid own trap zones", function() return runtime.pathAvoidOwnTraps == true end, function(v) runtime.pathAvoidOwnTraps = v; if PathService then PathService.Invalidate() end end)
-        toggle(espSec, "Egg ESP", "Show field eggs and labels", function() return runtime.showEggs ~= false end, function(v) runtime.showEggs = v end)
-
-        local misc = pageBuilders.pages.Misc
-        local miscSec = section(misc, "MOVEMENT")
-        toggle(miscSec, "Speed Bypass", "Use the movement speed bypass", function() return SpeedBypass and SpeedBypass.IsEnabled() or false end, function(v) if SpeedBypass then if v then SpeedBypass.Enable() else SpeedBypass.Disable() end end end)
+        local settingsRight = section(settings, "CONFIGURATION", UDim2.new(0.5, -8, 0, 0))
+        settingsRight.Position = UDim2.new(0.5, 8, 0, 0)
+        button(settingsRight, "Save Configuration", "Placeholder: local config storage", function() warn("[FIGGY] Save Configuration requires writefile support") end)
+        button(settingsRight, "Load Configuration", "Placeholder: local config storage", function() warn("[FIGGY] Load Configuration requires readfile support") end)
     end
 
     local function formatStatus()
