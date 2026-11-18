@@ -55,19 +55,33 @@ end)
 cacheToken = cacheToken or tostring(math.random(100000, 999999))
 
 local function httpGet(url)
-    local requestUrl = url .. (url:find("?", 1, true) and "&" or "?") .. "cache=" .. cacheToken
+    local cacheUrl = url .. (url:find("?", 1, true) and "&" or "?") .. "cache=" .. cacheToken
+    local urls = { cacheUrl, url }
 
-    if game ~= nil then
-        local ok, body = pcall(function() return game:HttpGet(requestUrl) end)
-        if ok and typeof(body) == "string" and #body > 0 then
-            return body
+    for _, requestUrl in ipairs(urls) do
+        local body
+
+        if game ~= nil then
+            local ok, result = pcall(function() return game:HttpGet(requestUrl) end)
+            if ok then body = result end
         end
-    end
 
-    if type(httpget) == "function" then
-        local ok, body = pcall(httpget, requestUrl)
-        if ok and typeof(body) == "string" and #body > 0 then
-            return body
+        if (typeof(body) ~= "string" or #body == 0) and type(httpget) == "function" then
+            local ok, result = pcall(httpget, requestUrl)
+            if ok then body = result end
+        end
+
+        if typeof(body) == "string" and #body > 0 then
+            local trimmed = body:gsub("^%s+", "")
+            local lower = trimmed:lower()
+
+            if lower:sub(1, 9) ~= "<!doctype"
+                and lower:sub(1, 5) ~= "<html"
+                and lower:sub(1, 1) ~= "<"
+                and trimmed:sub(1, 5) ~= "404: "
+                and trimmed:sub(1, 9) ~= "Not Found" then
+                return body
+            end
         end
     end
 
