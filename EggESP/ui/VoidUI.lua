@@ -655,7 +655,7 @@ function VoidUI:CreateWindow(cfg)
     stroke(main, T.Stroke, 1, 0.45)
 
     -- Sidebar
-    local sidebarW = 52
+    local sidebarW = math.clamp(tonumber(cfg.SidebarWidth) or 52, 52, 220)
     local sidebar = mk("Frame", {
         Name = "Sidebar",
         BackgroundColor3 = T.BgSidebar,
@@ -683,8 +683,39 @@ function VoidUI:CreateWindow(cfg)
     local logoIsAsset = typeof(logoIcon) == "string" and (logoIcon:find("rbxasset", 1, true) or logoIcon:find("http", 1, true))
     local logoTint = Color3.new(1, 1, 1)
     local logoHolder = makeIcon(logo, logoIcon, logoIsAsset and 28 or 20, logoTint, 2)
-    logoHolder.AnchorPoint = Vector2.new(0.5, 0.5)
-    logoHolder.Position = UDim2.fromScale(0.5, 0.5)
+    if sidebarW >= 140 then
+        logoHolder.AnchorPoint = Vector2.new(0, 0.5)
+        logoHolder.Position = UDim2.fromOffset(16, 27)
+
+        mk("TextLabel", {
+            Name = "Brand",
+            BackgroundTransparency = 1,
+            Font = Fonts.Title,
+            TextSize = 18,
+            TextColor3 = T.Text,
+            Text = title,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Position = UDim2.fromOffset(58, 14),
+            Size = UDim2.new(1, -66, 0, 26),
+            Parent = logo,
+        })
+
+        mk("TextLabel", {
+            Name = "Product",
+            BackgroundTransparency = 1,
+            Font = Fonts.Desc,
+            TextSize = 11,
+            TextColor3 = T.TextMute,
+            Text = author,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Position = UDim2.fromOffset(58, 38),
+            Size = UDim2.new(1, -66, 0, 14),
+            Parent = logo,
+        })
+    else
+        logoHolder.AnchorPoint = Vector2.new(0.5, 0.5)
+        logoHolder.Position = UDim2.fromScale(0.5, 0.5)
+    end
 
     local sideNav = mk("ScrollingFrame", {
         Name = "Nav",
@@ -2489,28 +2520,7 @@ function VoidUI:CreateWindow(cfg)
                                 end)
 
                                 item.MouseButton1Click:Connect(function()
-                                    if multi then
-                                        local found
-                                        for i, x in ipairs(current) do
-                                            if entriesEqual(x, v) then found = i break end
-                                        end
-                                        if found then
-                                            table.remove(current, found)
-                                        else
-                                            table.insert(current, v)
-                                        end
-                                        api.Value = current
-                                        refreshPreview()
-                                        fire()
-                                        setRowSelected(isSelected(v))
-                                        refreshCount()
-                                    else
-                                        current = v
-                                        api.Value = current
-                                        refreshPreview()
-                                        closeMenu()
-                                        fire()
-                                    end
+                                    navigateTo(e)
                                 end)
                             end
                         end
@@ -3033,10 +3043,6 @@ function VoidUI:CreateWindow(cfg)
                     if not viewH and maxVis then
                         viewH = contentH(maxVis)
                     end
-                    local useScroll = viewH ~= nil or resizable
-                    if useScroll and not viewH then
-                        viewH = contentH(math.min(5, math.max(#items, 3)))
-                    end
                     if viewH then
                         viewH = math.clamp(viewH, minH, maxH)
                     end
@@ -3258,291 +3264,15 @@ function VoidUI:CreateWindow(cfg)
                         for i = #rowFrames, 1, -1 do rowFrames[i] = nil end
 
                         for i, v in ipairs(items) do
+                            local sub = rowSub(v)
+                            local h = (sub ~= "" and ROW_H) or math.max(36, ROW_H - 6)
                             local r = mk("TextButton", {
                                 BackgroundColor3 = T.BgInput,
                                 AutoButtonColor = false,
                                 Text = "",
-                                Size = UDim2.new(1, 0, 0, ROW_H),
-                                LayoutOrder = i,
-                                Parent = listFrame,
-                            })
-                            corner(r, rCtrl)
-                            stroke(r, T.Stroke, 1, 0.5)
-                            rowFrames[i] = r
-
-                            local grip = makeIcon(r, "lucide:grip-vertical", 14, T.TextMute, 2)
-                            grip.AnchorPoint = Vector2.new(0, 0.5)
-                            grip.Position = UDim2.new(0, 8, 0.5, 0)
-
-                            local left = 28
-                            if showItemIcons then
-                                local asset = entryAsset(v) or normalizeAsset(type(v) == "table" and (v.Image or v.Icon))
-                                if asset then
-                                    local ic = makeIcon(r, asset, 16, T.Text, 2)
-                                    ic.AnchorPoint = Vector2.new(0, 0.5)
-                                    ic.Position = UDim2.new(0, 26, 0.5, 0)
-                                    left = 48
-                                end
-                            end
-
-                            mk("TextLabel", {
-                                Name = "Num",
-                                BackgroundTransparency = 1,
-                                Font = Fonts.Title,
-                                TextSize = 11,
-                                TextColor3 = T.TextMute,
-                                Text = "#" .. i,
-                                AnchorPoint = Vector2.new(0, 0.5),
-                                Position = UDim2.new(0, left, 0.5, 0),
-                                Size = UDim2.fromOffset(28, 16),
-                                ZIndex = 2,
-                                Parent = r,
-                            })
-                            mk("TextLabel", {
-                                Name = "Label",
-                                BackgroundTransparency = 1,
-                                Font = Fonts.Body,
-                                TextSize = 13,
-                                TextColor3 = T.Text,
-                                TextXAlignment = Enum.TextXAlignment.Left,
-                                TextTruncate = Enum.TextTruncate.AtEnd,
-                                Text = entryLabel(v),
-                                AnchorPoint = Vector2.new(0, 0.5),
-                                Position = UDim2.new(0, left + 28, 0.5, 0),
-                                Size = UDim2.new(1, -(left + 38), 0, 18),
-                                ZIndex = 2,
-                                Parent = r,
-                            })
-
-                            r.InputBegan:Connect(function(input)
-                                if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                                    and input.UserInputType ~= Enum.UserInputType.Touch then
-                                    return
-                                end
-                                local live = r.LayoutOrder
-                                startDrag(live, input)
-                            end)
-
-                            r.MouseEnter:Connect(function()
-                                if drag.active then return end
-                                tween(r, TI(0.1), { BackgroundColor3 = T.BgHover })
-                            end)
-                            r.MouseLeave:Connect(function()
-                                if drag.active then return end
-                                tween(r, TI(0.1), { BackgroundColor3 = T.BgInput })
-                            end)
-                        end
-                        api.Values = items
-                        if scroll then
-                            local h = contentH(#items)
-                            scroll.CanvasSize = UDim2.fromOffset(0, h)
-                            scroll.ScrollingEnabled = h > (scroll.AbsoluteSize.Y > 0 and scroll.AbsoluteSize.Y or (viewH or 0))
-                        end
-                    end
-
-                    local function applyViewH(h)
-                        if not scroll then return end
-                        viewH = math.clamp(math.floor(tonumber(h) or viewH or minH), minH, maxH)
-                        api.Height = viewH
-                        scroll.Size = UDim2.new(1, 0, 0, viewH)
-                        local ch = contentH(#items)
-                        scroll.CanvasSize = UDim2.fromOffset(0, ch)
-                        scroll.ScrollingEnabled = ch > viewH
-                        if o.OnResize then task.spawn(o.OnResize, viewH) end
-                    end
-
-                    UserInputService.InputChanged:Connect(function(input)
-                        if not drag.active then return end
-                        if input.UserInputType ~= Enum.UserInputType.MouseMovement
-                            and input.UserInputType ~= Enum.UserInputType.Touch then
-                            return
-                        end
-                        onDragMove(input)
-                    end)
-                    UserInputService.InputEnded:Connect(function(input)
-                        if not drag.active then return end
-                        if input.UserInputType == Enum.UserInputType.MouseButton1
-                            or input.UserInputType == Enum.UserInputType.Touch then
-                            endDrag()
-                        end
-                    end)
-
-                    function api:Set(listVals, silent)
-                        items = {}
-                        for i, v in ipairs(listVals or {}) do items[i] = v end
-                        buildRows()
-                        if not silent then fire() end
-                    end
-                    function api:Get()
-                        return items
-                    end
-                    function api:SetHeight(h, silent)
-                        applyViewH(h)
-                        if not silent and o.OnResize then task.spawn(o.OnResize, api.Height) end
-                    end
-                    function api:GetHeight()
-                        return api.Height
-                    end
-
-                    buildRows()
-
-                    -- Bottom grip — thin hit area (PriorityList resize)
-                    if resizable and scroll then
-                        local grip = mk("TextButton", {
-                            BackgroundTransparency = 1,
-                            AutoButtonColor = false,
-                            Text = "",
-                            Size = UDim2.new(1, 0, 0, 10),
-                            Parent = wrap,
-                        })
-                        mk("Frame", {
-                            BackgroundColor3 = accent,
-                            BackgroundTransparency = 0.55,
-                            AnchorPoint = Vector2.new(0.5, 0.5),
-                            Position = UDim2.fromScale(0.5, 0.5),
-                            Size = UDim2.fromOffset(28, 2),
-                            BorderSizePixel = 0,
-                            Parent = grip,
-                        })
-                        local resizing = false
-                        local startY, startH = 0, viewH or minH
-                        grip.InputBegan:Connect(function(input)
-                            if input.UserInputType ~= Enum.UserInputType.MouseButton1
-                                and input.UserInputType ~= Enum.UserInputType.Touch then
-                                return
-                            end
-                            resizing = true
-                            startY = input.Position.Y
-                            startH = viewH or scroll.AbsoluteSize.Y
-                        end)
-                        UserInputService.InputChanged:Connect(function(input)
-                            if not resizing then return end
-                            if input.UserInputType ~= Enum.UserInputType.MouseMovement
-                                and input.UserInputType ~= Enum.UserInputType.Touch then
-                                return
-                            end
-                            applyViewH(startH + (input.Position.Y - startY))
-                        end)
-                        UserInputService.InputEnded:Connect(function(input)
-                            if not resizing then return end
-                            if input.UserInputType == Enum.UserInputType.MouseButton1
-                                or input.UserInputType == Enum.UserInputType.Touch then
-                                resizing = false
-                            end
-                        end)
-                    end
-
-                    if o.Flag then Window._flags[o.Flag] = api end
-                    return api
-                end
-
-                -- Item / progress rows (icon + name + right text). Refresh with api:Set.
-                function Section:Panel(o)
-                    o = o or {}
-                    local items = {}
-                    for i, v in ipairs(o.Values or {}) do
-                        items[i] = v
-                    end
-                    local ROW_H = math.clamp(math.floor(tonumber(o.RowHeight) or 44), 36, 64)
-
-                    addDivider()
-                    rowOrder = rowOrder + 1
-                    local wrap = mk("Frame", {
-                        BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 0),
-                        AutomaticSize = Enum.AutomaticSize.Y,
-                        LayoutOrder = rowOrder,
-                        Parent = card,
-                    })
-                    pad(wrap, 6, 8, 8, 8)
-                    list(wrap, Enum.FillDirection.Vertical, 4)
-                    registerSearch(wrap, o.Title or "Panel", o.Desc)
-
-                    if o.Title then
-                        local head = mk("Frame", {
-                            BackgroundTransparency = 1,
-                            Size = UDim2.new(1, 0, 0, 18),
-                            Parent = wrap,
-                        })
-                        mk("TextLabel", {
-                            BackgroundTransparency = 1,
-                            Font = Fonts.Title,
-                            TextSize = 14,
-                            TextColor3 = T.Text,
-                            TextXAlignment = Enum.TextXAlignment.Left,
-                            Text = o.Title,
-                            Size = UDim2.new(1, 0, 0, 18),
-                            Parent = head,
-                        })
-                    end
-                    if not compactOn and o.Desc and o.Desc ~= "" then
-                        mk("TextLabel", {
-                            BackgroundTransparency = 1,
-                            Font = Fonts.Desc,
-                            TextSize = 11,
-                            TextColor3 = T.TextMute,
-                            TextWrapped = true,
-                            Text = o.Desc,
-                            Size = UDim2.new(1, 0, 0, 0),
-                            AutomaticSize = Enum.AutomaticSize.Y,
-                            Parent = wrap,
-                        })
-                    end
-
-                    local listHost = mk("Frame", {
-                        BackgroundTransparency = 1,
-                        Size = UDim2.new(1, 0, 0, 0),
-                        AutomaticSize = Enum.AutomaticSize.Y,
-                        Parent = wrap,
-                    })
-                    list(listHost, Enum.FillDirection.Vertical, 4)
-
-                    local emptyLab = mk("TextLabel", {
-                        BackgroundTransparency = 1,
-                        Font = Fonts.Desc,
-                        TextSize = 12,
-                        TextColor3 = T.TextMute,
-                        TextXAlignment = Enum.TextXAlignment.Left,
-                        Text = o.EmptyText or "Nothing selected",
-                        Size = UDim2.new(1, 0, 0, 18),
-                        Visible = #items == 0,
-                        Parent = wrap,
-                    })
-
-                    local api = { Values = items, Flag = o.Flag }
-
-                    local function rowName(v)
-                        if type(v) == "table" then
-                            return tostring(v.Name or v.Title or v.Id or "")
-                        end
-                        return tostring(v or "")
-                    end
-                    local function rowRight(v)
-                        if type(v) == "table" then
-                            return tostring(v.Right or v.Value or "")
-                        end
-                        return ""
-                    end
-                    local function rowSub(v)
-                        if type(v) == "table" then
-                            return tostring(v.Sub or v.Desc or "")
-                        end
-                        return ""
-                    end
-
-                    local function buildRows()
-                        for _, ch in ipairs(listHost:GetChildren()) do
-                            if ch:IsA("GuiObject") then ch:Destroy() end
-                        end
-                        emptyLab.Visible = #items == 0
-                        for i, v in ipairs(items) do
-                            local sub = rowSub(v)
-                            local h = (sub ~= "" and ROW_H) or math.max(36, ROW_H - 6)
-                            local r = mk("Frame", {
-                                BackgroundColor3 = T.BgInput,
                                 Size = UDim2.new(1, 0, 0, h),
                                 LayoutOrder = i,
-                                Parent = listHost,
+                                Parent = listFrame,
                             })
                             corner(r, rCtrl)
                             stroke(r, T.Stroke, 1, 0.5)
@@ -3617,39 +3347,25 @@ function VoidUI:CreateWindow(cfg)
                     return api
                 end
 
-                return Section
-            end
-
-            -- Hidden pages (Popup host) stay off the subtab bar
-            if popts.Hidden then
+                -- Tab() with Selected=true runs SelectTab before any Page exists,
+                -- so subtabs never appear until user re-clicks. Refresh when pages grow.
+                if Window._activeTab == Tab then
+                    if #Tab._pages >= 2 then
+                        Window:SelectTab(Tab)
+                    elseif #Tab._pages == 1 then
+                        Tab:SelectPage(Page)
+                    end
+                end
                 return Page
             end
-            -- convenience: Tab:Section goes to first/default page
-            table.insert(Tab._pages, Page)
-            if not Tab._activePage then
-                Tab._activePage = Page
-                Page.Frame.Visible = true
-                Page._active = true
-            end
-            -- Tab() with Selected=true runs SelectTab before any Page exists,
-            -- so subtabs never appear until user re-clicks. Refresh when pages grow.
-            if Window._activeTab == Tab then
-                if #Tab._pages >= 2 then
-                    Window:SelectTab(Tab)
-                elseif #Tab._pages == 1 then
-                    Tab:SelectPage(Page)
-                end
-            end
-            return Page
-        end
 
-        -- Tab:Section → auto page
-        function Tab:Section(sopts)
-            if #self._pages == 0 then
-                self:Page({ Title = self.Title })
+            -- Tab:Section → auto page
+            function Tab:Section(sopts)
+                if #self._pages == 0 then
+                    self:Page({ Title = self.Title })
+                end
+                return self._pages[1]:Section(sopts)
             end
-            return self._pages[1]:Section(sopts)
-        end
 
         btn.MouseButton1Click:Connect(function()
             Window:SelectTab(Tab)

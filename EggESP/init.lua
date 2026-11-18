@@ -212,6 +212,7 @@ local DrawingHub = HubDrawingModule.create({
     FarmFilterUI = FarmFilterUIModule,
     EggData = EggData,
     BasePenAutomation = BasePenAutomation,
+    InventoryManager = InventoryManager,
     LocalPlayer = deps.LocalPlayer,
 })
 
@@ -232,6 +233,7 @@ local Hub = forceDrawing and DrawingHub or VoidUIHubModule.create({
     FarmFilterUI = FarmFilterUIModule,
     EggData = EggData,
     BasePenAutomation = BasePenAutomation,
+    InventoryManager = InventoryManager,
     LocalPlayer = deps.LocalPlayer,
 })
 

@@ -116,6 +116,7 @@ function VoidUIHub.create(deps)
     local FarmFilterUI = deps.FarmFilterUI
     local EggData = deps.EggData
     local BasePenAutomation = deps.BasePenAutomation
+    local InventoryManager = deps.InventoryManager
     local LocalPlayer = deps.LocalPlayer or game:GetService("Players").LocalPlayer
     local DrawingHub = deps.DrawingHub
     local RunService = deps.RunService or game:GetService("RunService")
@@ -350,6 +351,7 @@ function VoidUIHub.create(deps)
             FarmFilterUI = FarmFilterUI,
             EggData = EggData,
             BasePenAutomation = BasePenAutomation,
+            InventoryManager = InventoryManager,
             LocalPlayer = LocalPlayer,
         }
     end

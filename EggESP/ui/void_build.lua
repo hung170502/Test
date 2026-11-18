@@ -16,6 +16,7 @@ return function(ctx)
     local FarmFilterUI = ctx.FarmFilterUI
     local EggData = ctx.EggData
     local BasePenAutomation = ctx.BasePenAutomation
+    local InventoryManager = ctx.InventoryManager
     local LocalPlayer = ctx.LocalPlayer
 
     local function invalidateFarmTarget()
@@ -33,11 +34,11 @@ return function(ctx)
     local statusParagraph
 
     window = VoidUI:CreateWindow({
-        Title = "Steal An Egg",
+        Title = "FIGGY",
         Author = "EggESP Hub",
         Icon = "lucide:egg",
         Accent = theme.dotCore or Color3.fromRGB(130, 60, 220),
-        Size = UDim2.fromOffset(700, 540),
+        Size = UDim2.fromOffset(980, 620),
         Transparency = 0.06,
         Bloom = false,
         Search = true,
@@ -48,7 +49,7 @@ return function(ctx)
         Folder = "StealAnEgg",
     })
 
-    local farmTab = window:Tab({ Title = "Farm", Icon = "lucide:target", Selected = true })
+    local farmTab = window:Tab({ Title = "Eggs", Icon = "lucide:egg", Selected = true })
     local farmPage = farmTab:Page({ Title = "Auto Farm", Columns = 1 })
 
     do
@@ -93,6 +94,20 @@ return function(ctx)
             Flag = "waitForDay",
             Callback = function(enabled)
                 runtime.waitForDayBeforeFarm = enabled
+            end,
+        })
+
+        mainSec:Toggle({
+            Title = "Anti Guard",
+            Desc = "Use guarded-zone walking behavior when approaching eggs",
+            Value = runtime.guardZoneForceWalk == true,
+            Flag = "antiGuard",
+            Callback = function(enabled)
+                runtime.guardZoneForceWalk = enabled == true
+
+                if PathService then
+                    PathService.Invalidate()
+                end
             end,
         })
 
@@ -318,7 +333,7 @@ return function(ctx)
             Title = "Speed Bypass",
             Desc = "Anti lagback speed while auto farming",
             Value = SpeedBypass and SpeedBypass.IsEnabled() or false,
-            Flag = "speedBypass",
+            Flag = "speedByPass",
             Callback = function(enabled)
                 if not SpeedBypass then
                     return
