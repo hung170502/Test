@@ -5,7 +5,7 @@
         loadstring(game:HttpGet("https://raw.githubusercontent.com/hung170502/Test/main/run.lua"))()
 ]]
 
-local BASE_URL = "https://raw.githubusercontent.com/hung170502/Test/37b6fc283e81461f027d2f7692285d1d0b07fc59/"
+local BASE_URL = "https://raw.githubusercontent.com/hung170502/Test/main/"
 
 local FILES = {
     "hub_loader.lua",
