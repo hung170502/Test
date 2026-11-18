@@ -87,10 +87,12 @@ function BasePenAutomation.create(deps)
     end
 
     local function getFeetPosition()
-        local feet = Player.Optional.FeetCFrame(LocalPlayer)
+        if Player and Player.Optional and type(Player.Optional.FeetCFrame) == "function" then
+            local ok, feet = pcall(Player.Optional.FeetCFrame, LocalPlayer)
 
-        if feet then
-            return feet.Position
+            if ok and feet and feet.Position then
+                return feet.Position
+            end
         end
 
         local rootPart = getRootPart()

@@ -177,9 +177,11 @@ function EggHub.create(deps)
         close.Parent = header
         corner(close, 8)
         close.Activated:Connect(function()
-            runtime.hubVisible = false
-            visible = false
-            window.Visible = false
+            runWithPluginIdentity(function()
+                runtime.hubVisible = false
+                visible = false
+                window.Visible = false
+            end)
         end)
 
         local pages = Instance.new("Frame")
@@ -229,25 +231,27 @@ function EggHub.create(deps)
             text(button, tab.label, 13, tab.id == "Eggs" and colors.text or colors.muted, UDim2.fromOffset(44, 0), UDim2.new(1, -48, 1, 0))
 
             button.Activated:Connect(function()
-                showPage(tab.id)
-                for _, child in ipairs(nav:GetChildren()) do
-                    if child:IsA("TextButton") then
-                        child.BackgroundColor3 = colors.panel2
-                        child.BackgroundTransparency = 0.45
-                        for _, label in ipairs(child:GetChildren()) do
-                            if label:IsA("TextLabel") then
-                                label.TextColor3 = colors.muted
+                runWithPluginIdentity(function()
+                    showPage(tab.id)
+                    for _, child in ipairs(nav:GetChildren()) do
+                        if child:IsA("TextButton") then
+                            child.BackgroundColor3 = colors.panel2
+                            child.BackgroundTransparency = 0.45
+                            for _, label in ipairs(child:GetChildren()) do
+                                if label:IsA("TextLabel") then
+                                    label.TextColor3 = colors.muted
+                                end
                             end
                         end
                     end
-                end
-                button.BackgroundColor3 = colors.accent
-                button.BackgroundTransparency = 0
-                for _, label in ipairs(button:GetChildren()) do
-                    if label:IsA("TextLabel") then
-                        label.TextColor3 = colors.text
+                    button.BackgroundColor3 = colors.accent
+                    button.BackgroundTransparency = 0
+                    for _, label in ipairs(button:GetChildren()) do
+                        if label:IsA("TextLabel") then
+                            label.TextColor3 = colors.text
+                        end
                     end
-                end
+                end)
             end)
 
             local page = Instance.new("ScrollingFrame")
@@ -324,15 +328,19 @@ function EggHub.create(deps)
         corner(knob, 8)
 
         local function update()
-            local enabled = getValue() == true
-            track.BackgroundColor3 = enabled and colors.accent or Color3.fromRGB(58, 62, 88)
-            knob.Position = enabled and UDim2.fromOffset(26, 2) or UDim2.fromOffset(2, 2)
+            runWithPluginIdentity(function()
+                local enabled = getValue() == true
+                track.BackgroundColor3 = enabled and colors.accent or Color3.fromRGB(58, 62, 88)
+                knob.Position = enabled and UDim2.fromOffset(26, 2) or UDim2.fromOffset(2, 2)
+            end)
         end
 
         update()
         row.Activated:Connect(function()
-            setValue(not (getValue() == true))
-            update()
+            runWithPluginIdentity(function()
+                setValue(not (getValue() == true))
+                update()
+            end)
         end)
         return row
     end
@@ -348,7 +356,9 @@ function EggHub.create(deps)
 
         text(b, title, 13, colors.text, UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 20))
         text(b, desc or "", 11, Color3.fromRGB(225, 222, 255), UDim2.fromOffset(14, 30), UDim2.new(1, -28, 0, 16))
-        b.Activated:Connect(callback)
+        b.Activated:Connect(function()
+            runWithPluginIdentity(callback)
+        end)
         return b
     end
 
@@ -396,15 +406,16 @@ function EggHub.create(deps)
         end
 
         refresh()
+        runWithPluginIdentity(refresh)
         track.InputBegan:Connect(function(input)
             if input.UserInputType == Enum.UserInputType.MouseButton1 then
                 dragging = true
-                applyAt(input.Position)
+                runWithPluginIdentity(function() applyAt(input.Position) end)
             end
         end)
         track.InputChanged:Connect(function(input)
             if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                applyAt(input.Position)
+                runWithPluginIdentity(function() applyAt(input.Position) end)
             end
         end)
         game:GetService("UserInputService").InputEnded:Connect(function(input)
@@ -526,10 +537,12 @@ function EggHub.create(deps)
         statusRunning = true
         statusTask = task.spawn(function()
             while statusRunning do
-                if gui and window then
-                    local status = window:FindFirstChild("Status", true)
-                    if status and status.SetText then status:SetText(formatStatus()) end
-                end
+                runWithPluginIdentity(function()
+                    if gui and window then
+                        local status = window:FindFirstChild("Status", true)
+                        if status and status.SetText then status:SetText(formatStatus()) end
+                    end
+                end)
                 task.wait(runtime.hubStatusRefreshInterval or 1)
             end
         end)
@@ -542,7 +555,9 @@ function EggHub.create(deps)
     local function SetVisible(value)
         runtime.hubVisible = value == true
         visible = runtime.hubVisible
-        if window then window.Visible = visible end
+        runWithPluginIdentity(function()
+            if window then window.Visible = visible end
+        end)
     end
 
     local function ToggleVisible()
@@ -551,8 +566,11 @@ function EggHub.create(deps)
     end
 
     local function start()
-        makeWindow()
-        SetVisible(runtime.hubVisible ~= false)
+        runWithPluginIdentity(function()
+            makeWindow()
+            attachKeybind()
+            SetVisible(runtime.hubVisible ~= false)
+        end)
         startStatusLoop()
     end
 
@@ -576,6 +594,31 @@ function EggHub.create(deps)
                 ToggleVisible()
             end
         end)
+    end
+
+    local function runWithPluginIdentity(fn)
+        local previous
+
+        if type(getthreadidentity) == "function" then
+            local ok, value = pcall(getthreadidentity)
+            if ok then previous = value end
+        end
+
+        if type(setthreadidentity) == "function" then
+            pcall(setthreadidentity, 8)
+        end
+
+        local results = table.pack(pcall(fn))
+
+        if type(setthreadidentity) == "function" and previous ~= nil then
+            pcall(setthreadidentity, previous)
+        end
+
+        if not results[1] then
+            warn("[FIGGY] UI callback failed: " .. tostring(results[2]))
+        end
+
+        return table.unpack(results, 2, results.n)
     end
 
     return {
