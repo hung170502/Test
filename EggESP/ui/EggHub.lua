@@ -607,6 +607,9 @@ function EggHub.create(deps)
         statusRunning = false
     end
 
+    local inputConnection
+    local attachKeybind
+
     local function SetVisible(value)
         runtime.hubVisible = value == true
         visible = runtime.hubVisible
@@ -662,8 +665,7 @@ function EggHub.create(deps)
         window = nil
     end
 
-    local inputConnection
-    local function attachKeybind()
+    attachKeybind = function()
         if inputConnection then return end
         inputConnection = game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
             if not processed and input.KeyCode == (runtime.hubToggleKey or Enum.KeyCode.G) then

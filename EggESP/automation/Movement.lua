@@ -158,7 +158,8 @@ function Movement.create(deps)
         end
     end
 
-    local function clearWalkConnection()
+    local clearWalkConnection
+    clearWalkConnection = function()
         if walkConnection then
             walkConnection:Disconnect()
             walkConnection = nil
