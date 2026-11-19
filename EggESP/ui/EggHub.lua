@@ -1,5 +1,7 @@
 --[[
-    FIGGY Native Hub — custom Roblox UI with no VoidUI dependency.
+    VENYX Steal An Egg UI Hub
+    Modern, high-fidelity Roblox GUI matching Venyx v1.7.2 style.
+    No VoidUI dependency required.
 ]]
 
 local EggHub = {}
@@ -17,71 +19,151 @@ function EggHub.create(deps)
     local PetAutomation = deps.PetAutomation
     local LocalPlayer = deps.LocalPlayer or game:GetService("Players").LocalPlayer
     local Movement = deps.Movement
+    local UserInputService = deps.UserInputService or game:GetService("UserInputService")
+    local RunService = deps.RunService or game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
 
     local runtime = Config.Runtime
     local callbacks = {}
     local gui
     local window
-    local content
-    local pageBuilders = {}
     local visible = runtime.hubVisible ~= false
     local statusTask
     local statusRunning = false
+    local inputConnection
+    local activeDropdownMenu = nil
 
+    -- Runtime defaults for Venyx options if not already set
+    if runtime.moveToEggMethod == nil then runtime.moveToEggMethod = "Teleport" end
+    if runtime.deliveryMethod == nil then runtime.deliveryMethod = "Quick steps" end
+    if runtime.autoFarmPriority == nil then runtime.autoFarmPriority = "Best value" end
+    if runtime.autoFarmMinValuePerSec == nil then runtime.autoFarmMinValuePerSec = 441000000 end -- 441M/s
+    if runtime.autoFarmMaxValuePerSec == nil then runtime.autoFarmMaxValuePerSec = 14000000000 end -- 14B/s
+    if runtime.autoHopDelay == nil then runtime.autoHopDelay = 30 end
+    if runtime.autoHopMode == nil then runtime.autoHopMode = "Lowest Player Count" end
+    if runtime.uiLanguage == nil then runtime.uiLanguage = "English" end
+    if runtime.whitelistEggNames == nil then
+        runtime.whitelistEggNames = { ArchAngel = true }
+    end
+    if runtime.teleportZones == nil then
+        runtime.teleportZones = { ["Cherry Blossom"] = true }
+    end
+    if runtime.uiMutationSelection == nil then
+        runtime.uiMutationSelection = { None = true }
+    end
+    if runtime.uiRaritySelection == nil then
+        runtime.uiRaritySelection = { Divine = true }
+    end
+    if runtime.uiZoneSelection == nil then
+        runtime.uiZoneSelection = { Alien = true }
+    end
+
+    -- Venyx Dark Theme Palette
     local colors = {
-        bg = Color3.fromRGB(10, 11, 24),
-        sidebar = Color3.fromRGB(12, 14, 31),
-        panel = Color3.fromRGB(18, 21, 44),
-        panel2 = Color3.fromRGB(23, 27, 58),
-        border = Color3.fromRGB(65, 71, 125),
-        text = Color3.fromRGB(244, 246, 255),
-        muted = Color3.fromRGB(148, 154, 190),
-        accent = Color3.fromRGB(139, 92, 246),
-        accent2 = Color3.fromRGB(99, 102, 241),
-        good = Color3.fromRGB(52, 211, 153),
-        red = Color3.fromRGB(244, 114, 182),
+        bg = Color3.fromRGB(14, 15, 19),
+        sidebar = Color3.fromRGB(11, 12, 16),
+        panel = Color3.fromRGB(20, 22, 28),
+        panelBorder = Color3.fromRGB(34, 37, 48),
+        card = Color3.fromRGB(24, 26, 34),
+        cardBorder = Color3.fromRGB(38, 42, 54),
+        control = Color3.fromRGB(30, 33, 44),
+        controlBorder = Color3.fromRGB(46, 51, 68),
+        controlHover = Color3.fromRGB(38, 42, 56),
+        badgeBg = Color3.fromRGB(36, 40, 54),
+        badgeBorder = Color3.fromRGB(50, 55, 74),
+        text = Color3.fromRGB(242, 244, 250),
+        muted = Color3.fromRGB(132, 137, 156),
+        subtext = Color3.fromRGB(90, 95, 115),
+        accent = Color3.fromRGB(99, 102, 241),      -- Sleek Indigo/Purple
+        accentGlow = Color3.fromRGB(129, 140, 248),
+        toggleActive = Color3.fromRGB(79, 70, 229),
+        toggleInactive = Color3.fromRGB(34, 37, 50),
+        knob = Color3.fromRGB(255, 255, 255),
+        green = Color3.fromRGB(46, 204, 113),
+        star = Color3.fromRGB(245, 158, 11),
+        red = Color3.fromRGB(239, 68, 68),
     }
 
     local function runWithPluginIdentity(fn)
-        if type(fn) ~= "function" then
-            return false
-        end
-
+        if type(fn) ~= "function" then return false end
         local previous
-
         if type(getthreadidentity) == "function" then
-            local identityOk, identity = pcall(getthreadidentity)
-
-            if identityOk then
-                previous = identity
-            end
+            local ok, id = pcall(getthreadidentity)
+            if ok then previous = id end
         end
-
         if type(setthreadidentity) == "function" then
             pcall(setthreadidentity, 8)
         end
-
         local ok, result = pcall(fn)
-
         if type(setthreadidentity) == "function" and previous ~= nil then
             pcall(setthreadidentity, previous)
         end
-
         if not ok then
-            warn("[FIGGY] UI callback failed: " .. tostring(result))
+            warn("[VENYX] UI callback error: " .. tostring(result))
             return false, result
         end
-
         return true, result
     end
 
-    local function ensureGui()
-        if gui and gui.Parent then
-            return gui
-        end
+    local function corner(parent, radius)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, radius or 8)
+        c.Parent = parent
+        return c
+    end
 
+    local function stroke(parent, color, thickness, transparency)
+        local s = Instance.new("UIStroke")
+        s.Color = color or colors.panelBorder
+        s.Thickness = thickness or 1
+        s.Transparency = transparency or 0
+        s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        s.Parent = parent
+        return s
+    end
+
+    local function text(parent, textValue, size, color, font, position, dimensions)
+        local l = Instance.new("TextLabel")
+        l.BackgroundTransparency = 1
+        l.Font = font or Enum.Font.GothamSemibold
+        l.Text = textValue or ""
+        l.TextSize = size or 12
+        l.TextColor3 = color or colors.text
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Center
+        l.Position = position or UDim2.fromOffset(0, 0)
+        l.Size = dimensions or UDim2.fromScale(1, 1)
+        l.Parent = parent
+        return l
+    end
+
+    -- Format numbers to M/s, B/s, k/s for sliders
+    local function formatPerSec(num)
+        if type(num) ~= "number" then return "0/s" end
+        if num >= 1e12 then
+            return string.format("%.1fT/s", num / 1e12):gsub("%.0T/s", "T/s")
+        elseif num >= 1e9 then
+            return string.format("%.0fB/s", num / 1e9)
+        elseif num >= 1e6 then
+            return string.format("%.0fM/s", num / 1e6)
+        elseif num >= 1e3 then
+            return string.format("%.0fk/s", num / 1e3)
+        else
+            return string.format("%d/s", math.floor(num))
+        end
+    end
+
+    local function closeActiveDropdown()
+        if activeDropdownMenu and activeDropdownMenu.Parent then
+            activeDropdownMenu:Destroy()
+            activeDropdownMenu = nil
+        end
+    end
+
+    local function ensureGui()
+        if gui and gui.Parent then return gui end
         gui = Instance.new("ScreenGui")
-        gui.Name = "FIGGYHub"
+        gui.Name = "VENYXHub"
         gui.ResetOnSpawn = false
         gui.IgnoreGuiInset = true
         gui.DisplayOrder = 100
@@ -92,772 +174,1560 @@ function EggHub.create(deps)
         return gui
     end
 
-    local function corner(parent, radius)
-        local c = Instance.new("UICorner")
-        c.CornerRadius = UDim.new(0, radius or 10)
-        c.Parent = parent
-        return c
-    end
-
-    local function stroke(parent, color, thickness, transparency)
-        local s = Instance.new("UIStroke")
-        s.Color = color or colors.border
-        s.Thickness = thickness or 1
-        s.Transparency = transparency or 0
-        s.Parent = parent
-        return s
-    end
-
-    local function text(parent, textValue, size, color, position, dimensions)
-        local l = Instance.new("TextLabel")
-        l.BackgroundTransparency = 1
-        l.Font = Enum.Font.GothamSemibold
-        l.Text = textValue
-        l.TextSize = size or 13
-        l.TextColor3 = color or colors.text
-        l.TextXAlignment = Enum.TextXAlignment.Left
-        l.TextYAlignment = Enum.TextYAlignment.Center
-        l.Position = position or UDim2.fromOffset(0, 0)
-        l.Size = dimensions or UDim2.fromScale(1, 1)
-        l.Parent = parent
-        return l
-    end
-
-    local buildPages
+    local pageFrames = {}
+    local navButtons = {}
+    local currentTabId = "Steal"
+    local currentStealSubTab = "AutoSteal"
+    local statusPillText
+    local stealSubTabAutoStealBtn
+    local stealSubTabPredictorBtn
+    local stealSubPageAutoSteal
+    local stealSubPagePredictor
 
     local function makeWindow()
-        if window and window.Parent then
-            return window
-        end
-
+        if window and window.Parent then return window end
         ensureGui()
 
+        -- Dismiss open dropdown if clicking anywhere in window
+        local overlayDismiss = Instance.new("TextButton")
+        overlayDismiss.Name = "OverlayDismiss"
+        overlayDismiss.BackgroundTransparency = 1
+        overlayDismiss.Size = UDim2.fromScale(1, 1)
+        overlayDismiss.Text = ""
+        overlayDismiss.ZIndex = 40
+        overlayDismiss.Visible = false
+        overlayDismiss.Parent = gui
+        overlayDismiss.Activated:Connect(function()
+            closeActiveDropdown()
+            overlayDismiss.Visible = false
+        end)
+
+        -- Main Window Frame
         window = Instance.new("Frame")
-        window.Name = "Main"
-        window.AnchorPoint = Vector2.new(1, 0)
-        window.Position = UDim2.new(1, -18, 0, 18)
-        window.Size = UDim2.fromOffset(980, 620)
+        window.Name = "MainWindow"
+        window.AnchorPoint = Vector2.new(0.5, 0.5)
+        window.Position = UDim2.new(0.5, 0, 0.5, 0)
+        window.Size = UDim2.fromOffset(920, 580)
         window.BackgroundColor3 = colors.bg
         window.BorderSizePixel = 0
         window.Visible = visible
+        window.ClipsDescendants = false
+        window.ZIndex = 1
         window.Parent = gui
-        corner(window, 16)
-        stroke(window, colors.border, 1, 0.25)
+        corner(window, 12)
+        stroke(window, colors.panelBorder, 1)
 
+        -- Soft Drop Shadow
         local shadow = Instance.new("ImageLabel")
         shadow.Name = "Shadow"
         shadow.AnchorPoint = Vector2.new(0.5, 0.5)
         shadow.Position = UDim2.fromScale(0.5, 0.5)
-        shadow.Size = UDim2.new(1, 30, 1, 30)
+        shadow.Size = UDim2.new(1, 36, 1, 36)
         shadow.BackgroundTransparency = 1
         shadow.Image = "rbxassetid://6015897843"
-        shadow.ImageColor3 = Color3.new(0, 0, 0)
-        shadow.ImageTransparency = 0.55
+        shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+        shadow.ImageTransparency = 0.45
         shadow.ScaleType = Enum.ScaleType.Slice
         shadow.SliceCenter = Rect.new(10, 10, 118, 118)
         shadow.ZIndex = 0
         shadow.Parent = window
 
-        local sidebar = Instance.new("Frame")
-        sidebar.Name = "Sidebar"
-        sidebar.Size = UDim2.new(0, 210, 1, 0)
-        sidebar.BackgroundColor3 = colors.sidebar
-        sidebar.BorderSizePixel = 0
-        sidebar.Parent = window
-        corner(sidebar, 16)
-
-        local brand = Instance.new("Frame")
-        brand.BackgroundTransparency = 1
-        brand.Position = UDim2.fromOffset(18, 18)
-        brand.Size = UDim2.new(1, -36, 0, 54)
-        brand.Parent = sidebar
-
-        local logo = Instance.new("TextLabel")
-        logo.Size = UDim2.fromOffset(42, 42)
-        logo.BackgroundColor3 = colors.accent
-        logo.Font = Enum.Font.GothamBlack
-        logo.Text = "F"
-        logo.TextSize = 22
-        logo.TextColor3 = Color3.new(1, 1, 1)
-        logo.Parent = brand
-        corner(logo, 12)
-
-        text(brand, "FIGGY", 18, colors.text, UDim2.fromOffset(54, 2), UDim2.new(1, -54, 0, 24))
-        text(brand, "Egg Automation", 11, colors.muted, UDim2.fromOffset(54, 25), UDim2.new(1, -54, 0, 18))
-
-        content = Instance.new("Frame")
-        content.Name = "Content"
-        content.Position = UDim2.fromOffset(210, 0)
-        content.Size = UDim2.new(1, -210, 1, 0)
-        content.BackgroundColor3 = colors.bg
-        content.BorderSizePixel = 0
-        content.Parent = window
-
-        local header = Instance.new("Frame")
-        header.Size = UDim2.new(1, 0, 0, 72)
-        header.BackgroundColor3 = colors.panel
-        header.BorderSizePixel = 0
-        header.Parent = content
-
-        text(header, "VENYX", 20, colors.text, UDim2.fromOffset(24, 10), UDim2.new(0.45, 0, 0, 26))
-        text(header, "Steal An Egg · v1.19", 11, colors.muted, UDim2.fromOffset(24, 36), UDim2.new(0.45, 0, 0, 16))
-
-        local search = Instance.new("TextBox")
-        search.Name = "Search"
-        search.AnchorPoint = Vector2.new(1, 0.5)
-        search.Position = UDim2.new(1, -92, 0.5, 0)
-        search.Size = UDim2.fromOffset(190, 34)
-        search.BackgroundColor3 = colors.panel2
-        search.BorderSizePixel = 0
-        search.PlaceholderText = "Search"
-        search.Text = ""
-        search.Font = Enum.Font.GothamSemibold
-        search.TextSize = 12
-        search.TextColor3 = colors.text
-        search.PlaceholderColor3 = colors.muted
-        search.ClearTextOnFocus = false
-        corner(search, 8)
-        stroke(search, colors.border, 1, 0.5)
-        search.Parent = header
-
-        search:GetPropertyChangedSignal("Text"):Connect(function()
-            local query = tostring(search.Text):lower()
-            for _, page in pairs(pageBuilders.pages or {}) do
-                if page:IsA("ScrollingFrame") then
-                    for _, descendant in ipairs(page:GetDescendants()) do
-                        if descendant:IsA("TextButton") or descendant:IsA("Frame") then
-                            local height = descendant.AbsoluteSize.Y
-                            if height >= 58 and height <= 68 then
-                                local found = ""
-                                for _, child in ipairs(descendant:GetChildren()) do
-                                    if child:IsA("TextLabel") then
-                                        found = found .. " " .. child.Text
-                                    end
-                                end
-                                descendant.Visible = query == "" or found:lower():find(query, 1, true) ~= nil
-                            end
-                        end
-                    end
-                end
-            end
-        end)
-
-        local minimize = Instance.new("TextButton")
-        minimize.AnchorPoint = Vector2.new(1, 0.5)
-        minimize.Position = UDim2.new(1, -54, 0.5, 0)
-        minimize.Size = UDim2.fromOffset(30, 30)
-        minimize.BackgroundColor3 = colors.panel2
-        minimize.BorderSizePixel = 0
-        minimize.Text = "—"
-        minimize.Font = Enum.Font.GothamBold
-        minimize.TextSize = 13
-        minimize.TextColor3 = colors.text
-        minimize.Parent = header
-        corner(minimize, 8)
-        minimize.Activated:Connect(function()
-            runWithPluginIdentity(function()
-                window.Visible = false
-                visible = false
-                runtime.hubVisible = false
-            end)
-        end)
-
-        local close = Instance.new("TextButton")
-        close.AnchorPoint = Vector2.new(1, 0.5)
-        close.Position = UDim2.new(1, -16, 0.5, 0)
-        close.Size = UDim2.fromOffset(30, 30)
-        close.BackgroundColor3 = colors.panel2
-        close.BorderSizePixel = 0
-        close.Text = "×"
-        close.Font = Enum.Font.GothamBold
-        close.TextSize = 16
-        close.TextColor3 = colors.text
-        close.Parent = header
-        corner(close, 8)
-        close.Activated:Connect(function()
-            runWithPluginIdentity(function()
-                window.Visible = false
-                visible = false
-                runtime.hubVisible = false
-            end)
-        end)
-
+        -- Window Dragging Logic
         do
-            local draggingWindow = false
-            local dragStart = nil
-            local windowStart = nil
+            local dragging = false
+            local dragStart
+            local startPos
 
-            header.InputBegan:Connect(function(input)
-                if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    draggingWindow = true
+            window.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 and input.Position.Y - window.AbsolutePosition.Y <= 52 then
+                    dragging = true
                     dragStart = input.Position
-                    windowStart = window.Position
+                    startPos = window.Position
                     input.Changed:Connect(function()
                         if input.UserInputState == Enum.UserInputState.End then
-                            draggingWindow = false
+                            dragging = false
                         end
                     end)
                 end
             end)
 
-            header.InputChanged:Connect(function(input)
-                if draggingWindow and input.UserInputType == Enum.UserInputType.MouseMovement and dragStart and windowStart then
+            window.InputChanged:Connect(function(input)
+                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
                     local delta = input.Position - dragStart
-                    pcall(function()
-                        window.Position = UDim2.new(windowStart.X.Scale, windowStart.X.Offset + delta.X, windowStart.Y.Scale, windowStart.Y.Offset + delta.Y)
-                    end)
+                    window.Position = UDim2.new(
+                        startPos.X.Scale,
+                        startPos.X.Offset + delta.X,
+                        startPos.Y.Scale,
+                        startPos.Y.Offset + delta.Y
+                    )
                 end
             end)
         end
 
-        local statusCard = Instance.new("Frame")
-        statusCard.Name = "Status"
-        statusCard.AnchorPoint = Vector2.new(1, 0.5)
-        statusCard.Position = UDim2.new(1, -300, 0.5, 0)
-        statusCard.Size = UDim2.fromOffset(190, 38)
-        statusCard.BackgroundColor3 = colors.panel2
-        statusCard.BorderSizePixel = 0
-        statusCard.Parent = header
-        corner(statusCard, 8)
+        ---------------------------------------------------------------------
+        -- TOP BAR (Header)
+        ---------------------------------------------------------------------
+        local topBar = Instance.new("Frame")
+        topBar.Name = "TopBar"
+        topBar.Size = UDim2.new(1, 0, 0, 52)
+        topBar.BackgroundColor3 = colors.sidebar
+        topBar.BorderSizePixel = 0
+        topBar.ZIndex = 2
+        topBar.Parent = window
+        corner(topBar, 12)
 
-        local statusText = text(statusCard, "Loading status...", 10, colors.muted, UDim2.fromOffset(12, 0), UDim2.new(1, -24, 1, 0))
-        statusText.TextWrapped = true
+        -- Square bottom corners for header
+        local topBarCover = Instance.new("Frame")
+        topBarCover.Position = UDim2.new(0, 0, 1, -8)
+        topBarCover.Size = UDim2.new(1, 0, 0, 8)
+        topBarCover.BackgroundColor3 = colors.sidebar
+        topBarCover.BorderSizePixel = 0
+        topBarCover.ZIndex = 2
+        topBarCover.Parent = topBar
 
-        local pages = Instance.new("Frame")
-        pages.Name = "Pages"
-        pages.Position = UDim2.fromOffset(0, 72)
-        pages.Size = UDim2.new(1, 0, 1, -72)
-        pages.BackgroundTransparency = 1
-        pages.Parent = content
+        local headerLine = Instance.new("Frame")
+        headerLine.Position = UDim2.new(0, 0, 1, 0)
+        headerLine.Size = UDim2.new(1, 0, 0, 1)
+        headerLine.BackgroundColor3 = colors.panelBorder
+        headerLine.BorderSizePixel = 0
+        headerLine.ZIndex = 3
+        headerLine.Parent = topBar
 
-        local nav = Instance.new("Frame")
-        nav.Position = UDim2.fromOffset(18, 88)
-        nav.Size = UDim2.new(1, -36, 1, -106)
-        nav.BackgroundTransparency = 1
-        nav.Parent = sidebar
+        -- Left Brand: Vx Logo + VENYX / Steal An Egg v1.7.2
+        local brandContainer = Instance.new("Frame")
+        brandContainer.BackgroundTransparency = 1
+        brandContainer.Position = UDim2.fromOffset(14, 0)
+        brandContainer.Size = UDim2.new(0, 500, 1, 0)
+        brandContainer.ZIndex = 3
+        brandContainer.Parent = topBar
 
-        local tabs = {
-            {id = "Home", label = "Home", icon = "⌂"},
-            {id = "Steal", label = "Steal", icon = "◉"},
-            {id = "AutoHop", label = "Auto Hop", icon = "⇄"},
-            {id = "Player", label = "Player", icon = "♙"},
-            {id = "Settings", label = "Settings", icon = "⚙"},
+        local brandLayout = Instance.new("UIListLayout")
+        brandLayout.FillDirection = Enum.FillDirection.Horizontal
+        brandLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+        brandLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+        brandLayout.Padding = UDim.new(0, 8)
+        brandLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        brandLayout.Parent = brandContainer
+
+        -- Stylized Vx Logo
+        local logoBox = Instance.new("Frame")
+        logoBox.LayoutOrder = 1
+        logoBox.Size = UDim2.fromOffset(26, 26)
+        logoBox.BackgroundColor3 = Color3.fromRGB(24, 26, 36)
+        logoBox.BorderSizePixel = 0
+        logoBox.ZIndex = 4
+        logoBox.Parent = brandContainer
+        corner(logoBox, 6)
+        stroke(logoBox, colors.panelBorder, 1)
+
+        local logoText = text(logoBox, "Vx", 13, colors.text, Enum.Font.GothamBlack)
+        logoText.TextXAlignment = Enum.TextXAlignment.Center
+
+        -- "VENYX" Title
+        local venyxLabel = text(brandContainer, "VENYX", 14, colors.text, Enum.Font.GothamBold)
+        venyxLabel.LayoutOrder = 2
+        venyxLabel.Size = UDim2.fromOffset(56, 26)
+
+        -- "/" Separator
+        local sepLabel = text(brandContainer, "/", 13, colors.subtext, Enum.Font.GothamBold)
+        sepLabel.LayoutOrder = 3
+        sepLabel.Size = UDim2.fromOffset(8, 26)
+
+        -- "Steal An Egg" Subtitle
+        local gameLabel = text(brandContainer, "Steal An Egg", 13, colors.muted, Enum.Font.GothamSemibold)
+        gameLabel.LayoutOrder = 4
+        gameLabel.Size = UDim2.fromOffset(84, 26)
+
+        -- "v1.7.2" Version Badge
+        local verBadge = Instance.new("Frame")
+        verBadge.LayoutOrder = 5
+        verBadge.Size = UDim2.fromOffset(46, 20)
+        verBadge.BackgroundColor3 = Color3.fromRGB(24, 27, 36)
+        verBadge.BorderSizePixel = 0
+        verBadge.ZIndex = 4
+        verBadge.Parent = brandContainer
+        corner(verBadge, 5)
+        stroke(verBadge, colors.panelBorder, 1)
+
+        local verLabel = text(verBadge, "v1.7.2", 10, colors.muted, Enum.Font.GothamMedium)
+        verLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+        -- Live Status Pill: "● Caught Void Pearl x19"
+        local statusPill = Instance.new("Frame")
+        statusPill.LayoutOrder = 6
+        statusPill.Size = UDim2.fromOffset(170, 24)
+        statusPill.BackgroundColor3 = Color3.fromRGB(20, 23, 31)
+        statusPill.BorderSizePixel = 0
+        statusPill.ZIndex = 4
+        statusPill.Parent = brandContainer
+        corner(statusPill, 12)
+        stroke(statusPill, colors.cardBorder, 1)
+
+        local dot = Instance.new("Frame")
+        dot.Size = UDim2.fromOffset(7, 7)
+        dot.Position = UDim2.fromOffset(10, 8.5)
+        dot.BackgroundColor3 = colors.green
+        dot.BorderSizePixel = 0
+        dot.ZIndex = 5
+        dot.Parent = statusPill
+        corner(dot, 4)
+
+        statusPillText = text(statusPill, "Caught Void Pearl x19", 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(23, 0), UDim2.new(1, -28, 1, 0))
+
+        -- Top Right Actions: Language, Search, Minimize, Close
+        local topActions = Instance.new("Frame")
+        topActions.BackgroundTransparency = 1
+        topActions.AnchorPoint = Vector2.new(1, 0.5)
+        topActions.Position = UDim2.new(1, -12, 0.5, 0)
+        topActions.Size = UDim2.fromOffset(360, 32)
+        topActions.ZIndex = 3
+        topActions.Parent = topBar
+
+        local topActionsLayout = Instance.new("UIListLayout")
+        topActionsLayout.FillDirection = Enum.FillDirection.Horizontal
+        topActionsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+        topActionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+        topActionsLayout.Padding = UDim.new(0, 8)
+        topActionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        topActionsLayout.Parent = topActions
+
+        -- Language Selector Pill: "文A English"
+        local langBtn = Instance.new("TextButton")
+        langBtn.LayoutOrder = 1
+        langBtn.Size = UDim2.fromOffset(88, 28)
+        langBtn.BackgroundColor3 = colors.panel
+        langBtn.BorderSizePixel = 0
+        langBtn.Text = "文A  " .. (runtime.uiLanguage or "English")
+        langBtn.Font = Enum.Font.GothamSemibold
+        langBtn.TextSize = 11
+        langBtn.TextColor3 = colors.text
+        langBtn.AutoButtonColor = false
+        langBtn.ZIndex = 4
+        langBtn.Parent = topActions
+        corner(langBtn, 7)
+        stroke(langBtn, colors.cardBorder, 1)
+
+        langBtn.Activated:Connect(function()
+            if runtime.uiLanguage == "English" then
+                runtime.uiLanguage = "Tiếng Việt"
+            else
+                runtime.uiLanguage = "English"
+            end
+            langBtn.Text = "文A  " .. runtime.uiLanguage
+        end)
+
+        -- Search Bar: "🔍 Search"
+        local searchContainer = Instance.new("Frame")
+        searchContainer.LayoutOrder = 2
+        searchContainer.Size = UDim2.fromOffset(130, 28)
+        searchContainer.BackgroundColor3 = colors.panel
+        searchContainer.BorderSizePixel = 0
+        searchContainer.ZIndex = 4
+        searchContainer.Parent = topActions
+        corner(searchContainer, 7)
+        stroke(searchContainer, colors.cardBorder, 1)
+
+        local searchBox = Instance.new("TextBox")
+        searchBox.Size = UDim2.new(1, -16, 1, 0)
+        searchBox.Position = UDim2.fromOffset(10, 0)
+        searchBox.BackgroundTransparency = 1
+        searchBox.PlaceholderText = "🔍 Search"
+        searchBox.PlaceholderColor3 = colors.muted
+        searchBox.Text = ""
+        searchBox.Font = Enum.Font.GothamSemibold
+        searchBox.TextSize = 11
+        searchBox.TextColor3 = colors.text
+        searchBox.ClearTextOnFocus = false
+        searchBox.ZIndex = 5
+        searchBox.Parent = searchContainer
+
+        -- Search filtering logic across visible cards/rows
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            local query = tostring(searchBox.Text):lower():gsub("^%s*(.-)%s*$", "%1")
+            local activePage = pageFrames[currentTabId]
+            if not activePage then return end
+
+            for _, desc in ipairs(activePage:GetDescendants()) do
+                if desc:IsA("Frame") and desc:FindFirstChild("__IS_CONTROL_ROW") then
+                    local rowTitle = desc:FindFirstChild("__ROW_TITLE")
+                    if rowTitle and rowTitle:IsA("TextLabel") then
+                        local t = rowTitle.Text:lower()
+                        desc.Visible = query == "" or t:find(query, 1, true) ~= nil
+                    end
+                end
+            end
+        end)
+
+        -- Minimize Button
+        local minBtn = Instance.new("TextButton")
+        minBtn.LayoutOrder = 3
+        minBtn.Size = UDim2.fromOffset(28, 28)
+        minBtn.BackgroundColor3 = colors.panel
+        minBtn.BorderSizePixel = 0
+        minBtn.Text = "—"
+        minBtn.Font = Enum.Font.GothamBold
+        minBtn.TextSize = 12
+        minBtn.TextColor3 = colors.muted
+        minBtn.AutoButtonColor = false
+        minBtn.ZIndex = 4
+        minBtn.Parent = topActions
+        corner(minBtn, 7)
+        stroke(minBtn, colors.cardBorder, 1)
+
+        minBtn.Activated:Connect(function()
+            window.Visible = false
+            visible = false
+            runtime.hubVisible = false
+        end)
+
+        -- Close Button
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.LayoutOrder = 4
+        closeBtn.Size = UDim2.fromOffset(28, 28)
+        closeBtn.BackgroundColor3 = colors.panel
+        closeBtn.BorderSizePixel = 0
+        closeBtn.Text = "×"
+        closeBtn.Font = Enum.Font.GothamBold
+        closeBtn.TextSize = 15
+        closeBtn.TextColor3 = colors.muted
+        closeBtn.AutoButtonColor = false
+        closeBtn.ZIndex = 4
+        closeBtn.Parent = topActions
+        corner(closeBtn, 7)
+        stroke(closeBtn, colors.cardBorder, 1)
+
+        closeBtn.Activated:Connect(function()
+            window.Visible = false
+            visible = false
+            runtime.hubVisible = false
+        end)
+
+        ---------------------------------------------------------------------
+        -- SIDEBAR (Left Icons)
+        ---------------------------------------------------------------------
+        local sidebar = Instance.new("Frame")
+        sidebar.Name = "Sidebar"
+        sidebar.Position = UDim2.fromOffset(0, 52)
+        sidebar.Size = UDim2.new(0, 60, 1, -52)
+        sidebar.BackgroundColor3 = colors.sidebar
+        sidebar.BorderSizePixel = 0
+        sidebar.ZIndex = 2
+        sidebar.Parent = window
+
+        local sidebarLine = Instance.new("Frame")
+        sidebarLine.Position = UDim2.new(1, 0, 0, 0)
+        sidebarLine.Size = UDim2.new(0, 1, 1, 0)
+        sidebarLine.BackgroundColor3 = colors.panelBorder
+        sidebarLine.BorderSizePixel = 0
+        sidebarLine.ZIndex = 3
+        sidebarLine.Parent = sidebar
+
+        local navList = Instance.new("Frame")
+        navList.BackgroundTransparency = 1
+        navList.Position = UDim2.fromOffset(7, 14)
+        navList.Size = UDim2.new(1, -14, 1, -80)
+        navList.ZIndex = 3
+        navList.Parent = sidebar
+
+        local navLayout = Instance.new("UIListLayout")
+        navLayout.FillDirection = Enum.FillDirection.Vertical
+        navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        navLayout.Padding = UDim.new(0, 8)
+        navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        navLayout.Parent = navList
+
+        local tabsData = {
+            { id = "Home", icon = "⌂", title = "Home" },
+            { id = "Steal", icon = "🥚", title = "Steal" },
+            { id = "Pet", icon = "🌱", title = "Pets" },
+            { id = "ESP", icon = "✨", title = "Visuals" },
+            { id = "Player", icon = "👤", title = "Player" },
+            { id = "Settings", icon = "⚙", title = "Settings" },
         }
 
-        local activePage
-        local function showPage(id)
-            for pageId, page in pairs(pageBuilders.pages or {}) do
-                page.Visible = pageId == id
+        local function updateSidebarSelection(selectedId)
+            currentTabId = selectedId
+            for id, btn in pairs(navButtons) do
+                local isSel = id == selectedId
+                btn.BackgroundColor3 = isSel and Color3.fromRGB(28, 30, 42) or Color3.fromRGB(11, 12, 16)
+                local btnStroke = btn:FindFirstChildOfClass("UIStroke")
+                if btnStroke then
+                    btnStroke.Color = isSel and Color3.fromRGB(58, 62, 84) or Color3.fromRGB(11, 12, 16)
+                    btnStroke.Transparency = isSel and 0 or 1
+                end
+                local iconLbl = btn:FindFirstChildOfClass("TextLabel")
+                if iconLbl then
+                    iconLbl.TextColor3 = isSel and colors.text or colors.muted
+                end
             end
+            for id, page in pairs(pageFrames) do
+                page.Visible = id == selectedId
+            end
+            closeActiveDropdown()
         end
 
-        pageBuilders.pages = {}
-        pageBuilders.content = pages
+        for idx, tabInfo in ipairs(tabsData) do
+            local btn = Instance.new("TextButton")
+            btn.Name = tabInfo.id .. "NavBtn"
+            btn.LayoutOrder = idx
+            btn.Size = UDim2.fromOffset(42, 42)
+            btn.BackgroundColor3 = tabInfo.id == "Steal" and Color3.fromRGB(28, 30, 42) or Color3.fromRGB(11, 12, 16)
+            btn.BorderSizePixel = 0
+            btn.Text = ""
+            btn.AutoButtonColor = false
+            btn.ZIndex = 4
+            btn.Parent = navList
+            corner(btn, 12)
+            local s = stroke(btn, Color3.fromRGB(58, 62, 84), 1)
+            s.Transparency = tabInfo.id == "Steal" and 0 or 1
 
-        for index, tab in ipairs(tabs) do
-            local button = Instance.new("TextButton")
-            button.Position = UDim2.fromOffset(0, (index - 1) * 58)
-            button.Size = UDim2.new(1, 0, 0, 48)
-            button.BackgroundColor3 = tab.id == "Steal" and colors.accent or colors.panel2
-            button.BackgroundTransparency = tab.id == "Steal" and 0 or 0.45
-            button.BorderSizePixel = 0
-            button.Text = ""
-            button.Parent = nav
-            corner(button, 10)
+            local iconLbl = text(btn, tabInfo.icon, 18, tabInfo.id == "Steal" and colors.text or colors.muted)
+            iconLbl.TextXAlignment = Enum.TextXAlignment.Center
 
-            text(button, tab.icon, 16, colors.text, UDim2.fromOffset(14, 0), UDim2.fromOffset(28, 48))
-            text(button, tab.label, 13, tab.id == "Steal" and colors.text or colors.muted, UDim2.fromOffset(44, 0), UDim2.new(1, -48, 1, 0))
-
-            button.Activated:Connect(function()
+            btn.Activated:Connect(function()
                 runWithPluginIdentity(function()
-                    showPage(tab.id)
-                    for _, child in ipairs(nav:GetChildren()) do
-                        if child:IsA("TextButton") then
-                            child.BackgroundColor3 = colors.panel2
-                            child.BackgroundTransparency = 0.45
-                            for _, label in ipairs(child:GetChildren()) do
-                                if label:IsA("TextLabel") then
-                                    label.TextColor3 = colors.muted
-                                end
-                            end
-                        end
-                    end
-                    button.BackgroundColor3 = colors.accent
-                    button.BackgroundTransparency = 0
-                    for _, label in ipairs(button:GetChildren()) do
-                        if label:IsA("TextLabel") then
-                            label.TextColor3 = colors.text
-                        end
-                    end
+                    updateSidebarSelection(tabInfo.id)
                 end)
             end)
 
-            local page = Instance.new("ScrollingFrame")
-            page.Name = tab.id
-            page.Size = UDim2.new(1, -32, 1, -24)
-            page.Position = UDim2.fromOffset(16, 12)
-            page.BackgroundTransparency = 1
-            page.BorderSizePixel = 0
-            page.ScrollBarThickness = 4
-            page.ScrollBarImageColor3 = colors.accent
-            page.Visible = tab.id == "Steal"
-            page.CanvasSize = UDim2.fromOffset(0, 0)
-            page.AutomaticCanvasSize = Enum.AutomaticSize.Y
-            page.Parent = pages
-            pageBuilders.pages[tab.id] = page
+            navButtons[tabInfo.id] = btn
         end
 
-        buildPages()
-        return window
-    end
+        -- Bottom Avatar: User Headshot
+        local avatarFrame = Instance.new("Frame")
+        avatarFrame.AnchorPoint = Vector2.new(0.5, 1)
+        avatarFrame.Position = UDim2.new(0.5, 0, 1, -12)
+        avatarFrame.Size = UDim2.fromOffset(36, 36)
+        avatarFrame.BackgroundColor3 = colors.card
+        avatarFrame.BorderSizePixel = 0
+        avatarFrame.ZIndex = 4
+        avatarFrame.Parent = sidebar
+        corner(avatarFrame, 18)
+        stroke(avatarFrame, colors.cardBorder, 1)
 
-    local function section(parent, title, columnWidth)
-        local f = Instance.new("Frame")
-        f.BackgroundColor3 = colors.panel
-        f.BorderSizePixel = 0
-        f.Size = columnWidth or UDim2.new(1, 0, 0, 0)
-        f.AutomaticSize = Enum.AutomaticSize.Y
-        f.Parent = parent
-        corner(f, 12)
-        stroke(f, colors.border, 1, 0.5)
+        local avatarImg = Instance.new("ImageLabel")
+        avatarImg.Size = UDim2.fromScale(1, 1)
+        avatarImg.BackgroundTransparency = 1
+        avatarImg.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId)
+        avatarImg.ZIndex = 5
+        avatarImg.Parent = avatarFrame
+        corner(avatarImg, 18)
 
-        text(f, title, 12, colors.accent, UDim2.fromOffset(16, 10), UDim2.new(1, -32, 0, 18))
+        ---------------------------------------------------------------------
+        -- MAIN CONTENT AREA
+        ---------------------------------------------------------------------
+        local mainArea = Instance.new("Frame")
+        mainArea.Name = "MainArea"
+        mainArea.Position = UDim2.fromOffset(61, 52)
+        mainArea.Size = UDim2.new(1, -61, 1, -52)
+        mainArea.BackgroundColor3 = colors.bg
+        mainArea.BorderSizePixel = 0
+        mainArea.ZIndex = 2
+        mainArea.Parent = window
 
-        local list = Instance.new("UIListLayout")
-        list.Padding = UDim.new(0, 8)
-        list.HorizontalAlignment = Enum.HorizontalAlignment.Center
-        list.SortOrder = Enum.SortOrder.LayoutOrder
-        list.Parent = f
+        -- Overlay container for floating dropdown menus
+        local overlay = Instance.new("Frame")
+        overlay.Name = "DropdownOverlay"
+        overlay.Size = UDim2.fromScale(1, 1)
+        overlay.BackgroundTransparency = 1
+        overlay.ZIndex = 50
+        overlay.Parent = window
 
-        local pad = Instance.new("UIPadding")
-        pad.PaddingTop = UDim.new(0, 38)
-        pad.PaddingBottom = UDim.new(0, 12)
-        pad.PaddingLeft = UDim.new(0, 12)
-        pad.PaddingRight = UDim.new(0, 12)
-        pad.Parent = f
-        return f
-    end
+        ---------------------------------------------------------------------
+        -- HELPER COMPONENT BUILDERS (Matching Venyx UI precisely)
+        ---------------------------------------------------------------------
 
-    local function toggle(parent, title, desc, getValue, setValue)
-        local row = Instance.new("TextButton")
-        row.Size = UDim2.new(1, 0, 0, 58)
-        row.BackgroundColor3 = colors.panel2
-        row.BorderSizePixel = 0
-        row.AutoButtonColor = false
-        row.Text = ""
-        row.Parent = parent
-        corner(row, 9)
+        -- Collapsible Section Card
+        local function createCard(parent, title, iconSymbol, defaultCollapsed)
+            local card = Instance.new("Frame")
+            card.Size = UDim2.new(1, 0, 0, 0)
+            card.AutomaticSize = Enum.AutomaticSize.Y
+            card.BackgroundColor3 = colors.panel
+            card.BorderSizePixel = 0
+            card.ZIndex = 3
+            card.Parent = parent
+            corner(card, 12)
+            stroke(card, colors.panelBorder, 1)
 
-        text(row, title, 13, colors.text, UDim2.fromOffset(14, 8), UDim2.new(1, -78, 0, 20))
-        text(row, desc or "", 11, colors.muted, UDim2.fromOffset(14, 30), UDim2.new(1, -78, 0, 16))
+            local cardHeader = Instance.new("TextButton")
+            cardHeader.Size = UDim2.new(1, 0, 0, 42)
+            cardHeader.BackgroundTransparency = 1
+            cardHeader.Text = ""
+            cardHeader.AutoButtonColor = false
+            cardHeader.ZIndex = 4
+            cardHeader.Parent = card
 
-        local track = Instance.new("Frame")
-        track.Position = UDim2.new(1, -58, 0.5, -10)
-        track.Size = UDim2.fromOffset(44, 20)
-        track.BorderSizePixel = 0
-        track.Parent = row
-        corner(track, 10)
+            local headerTitle = text(cardHeader, (iconSymbol and (iconSymbol .. "  ") or "") .. title, 12, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(1, -50, 1, 0))
 
-        local knob = Instance.new("Frame")
-        knob.Size = UDim2.fromOffset(16, 16)
-        knob.Position = UDim2.fromOffset(2, 2)
-        knob.BorderSizePixel = 0
-        knob.Parent = track
-        corner(knob, 8)
+            local chevron = text(cardHeader, defaultCollapsed and "›" or "⌄", 15, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -30, 0, 0), UDim2.fromOffset(20, 42))
+            chevron.TextXAlignment = Enum.TextXAlignment.Center
 
-        local function update()
-            runWithPluginIdentity(function()
-                local enabled = getValue() == true
-                track.BackgroundColor3 = enabled and colors.accent or Color3.fromRGB(58, 62, 88)
-                knob.Position = enabled and UDim2.fromOffset(26, 2) or UDim2.fromOffset(2, 2)
+            local body = Instance.new("Frame")
+            body.Name = "CardBody"
+            body.Position = UDim2.fromOffset(0, 42)
+            body.Size = UDim2.new(1, 0, 0, 0)
+            body.AutomaticSize = Enum.AutomaticSize.Y
+            body.BackgroundTransparency = 1
+            body.Visible = not defaultCollapsed
+            body.ZIndex = 4
+            body.Parent = card
+
+            local bodyLayout = Instance.new("UIListLayout")
+            bodyLayout.Padding = UDim.new(0, 6)
+            bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            bodyLayout.Parent = body
+
+            local bodyPadding = Instance.new("UIPadding")
+            bodyPadding.PaddingTop = UDim.new(0, 4)
+            bodyPadding.PaddingBottom = UDim.new(0, 14)
+            bodyPadding.PaddingLeft = UDim.new(0, 16)
+            bodyPadding.PaddingRight = UDim.new(0, 16)
+            bodyPadding.Parent = body
+
+            cardHeader.Activated:Connect(function()
+                closeActiveDropdown()
+                body.Visible = not body.Visible
+                chevron.Text = body.Visible and "⌄" or "›"
             end)
+
+            return card, body
         end
 
-        update()
-        row.Activated:Connect(function()
-            runWithPluginIdentity(function()
-                setValue(not (getValue() == true))
-                update()
-            end)
-        end)
-        return row
-    end
+        -- Row Container with Title
+        local function createRow(parent, labelText)
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 36)
+            row.BackgroundTransparency = 1
+            row.BorderSizePixel = 0
+            row.ZIndex = 5
+            row.Parent = parent
 
-    local function button(parent, title, desc, callback)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1, 0, 0, 58)
-        b.BackgroundColor3 = colors.accent
-        b.BorderSizePixel = 0
-        b.Text = ""
-        b.Parent = parent
-        corner(b, 9)
+            local mark = Instance.new("Folder")
+            mark.Name = "__IS_CONTROL_ROW"
+            mark.Parent = row
 
-        text(b, title, 13, colors.text, UDim2.fromOffset(14, 8), UDim2.new(1, -28, 0, 20))
-        text(b, desc or "", 11, Color3.fromRGB(225, 222, 255), UDim2.fromOffset(14, 30), UDim2.new(1, -28, 0, 16))
-        b.Activated:Connect(function()
-            runWithPluginIdentity(callback)
-        end)
-        return b
-    end
+            local title = text(row, labelText, 12, colors.text, Enum.Font.GothamSemibold, UDim2.fromOffset(0, 0), UDim2.new(0.48, 0, 1, 0))
+            title.Name = "__ROW_TITLE"
 
-    local function slider(parent, title, getValue, setValue, minValue, maxValue, step, suffix)
-        local row = Instance.new("Frame")
-        row.Size = UDim2.new(1, 0, 0, 68)
-        row.BackgroundColor3 = colors.panel2
-        row.BorderSizePixel = 0
-        row.Parent = parent
-        corner(row, 9)
+            local rightSlot = Instance.new("Frame")
+            rightSlot.AnchorPoint = Vector2.new(1, 0.5)
+            rightSlot.Position = UDim2.new(1, 0, 0.5, 0)
+            rightSlot.Size = UDim2.new(0.52, 0, 1, 0)
+            rightSlot.BackgroundTransparency = 1
+            rightSlot.ZIndex = 5
+            rightSlot.Parent = row
 
-        local valueLabel = text(row, title, 12, colors.text, UDim2.fromOffset(14, 8), UDim2.new(0.7, 0, 0, 18))
-        local track = Instance.new("TextButton")
-        track.Position = UDim2.fromOffset(14, 42)
-        track.Size = UDim2.new(1, -28, 0, 8)
-        track.BackgroundColor3 = Color3.fromRGB(58, 62, 88)
-        track.BorderSizePixel = 0
-        track.Text = ""
-        track.AutoButtonColor = false
-        track.Parent = row
-        corner(track, 4)
-
-        local fill = Instance.new("Frame")
-        fill.Size = UDim2.fromScale(0, 1)
-        fill.BackgroundColor3 = colors.accent
-        fill.BorderSizePixel = 0
-        fill.Parent = track
-        corner(fill, 4)
-
-        local dragging = false
-        local function applyAt(position)
-            local rel = math.clamp((position.X - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
-            local raw = minValue + rel * (maxValue - minValue)
-            local stepped = math.floor((raw / step) + 0.5) * step
-            stepped = math.clamp(stepped, minValue, maxValue)
-            setValue(stepped)
-            fill.Size = UDim2.fromScale((stepped - minValue) / (maxValue - minValue), 1)
-            valueLabel.Text = string.format("%s: %s%s", title, tostring(stepped), suffix or "")
+            return row, rightSlot
         end
 
-        local function refresh()
-            local value = math.clamp(getValue() or minValue, minValue, maxValue)
-            fill.Size = UDim2.fromScale((value - minValue) / (maxValue - minValue), 1)
-            valueLabel.Text = string.format("%s: %s%s", title, tostring(value), suffix or "")
-        end
+        -- Modern Toggle Switch (Pill with circular knob)
+        local function addToggle(parent, labelText, getValue, setValue)
+            local row, rightSlot = createRow(parent, labelText)
 
-        refresh()
-        runWithPluginIdentity(refresh)
-        track.InputBegan:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true
-                runWithPluginIdentity(function() applyAt(input.Position) end)
-            end
-        end)
-        track.InputChanged:Connect(function(input)
-            if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
-                runWithPluginIdentity(function() applyAt(input.Position) end)
-            end
-        end)
-        game:GetService("UserInputService").InputEnded:Connect(function(input)
-            if input.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-        end)
-        return row
-    end
+            local switch = Instance.new("TextButton")
+            switch.AnchorPoint = Vector2.new(1, 0.5)
+            switch.Position = UDim2.new(1, 0, 0.5, 0)
+            switch.Size = UDim2.fromOffset(42, 22)
+            switch.BackgroundColor3 = colors.toggleInactive
+            switch.BorderSizePixel = 0
+            switch.Text = ""
+            switch.AutoButtonColor = false
+            switch.ZIndex = 6
+            switch.Parent = rightSlot
+            corner(switch, 11)
+            stroke(switch, colors.cardBorder, 1)
 
-    local function grid(parent)
-        local g = Instance.new("UIGridLayout")
-        g.CellPadding = UDim2.fromOffset(8, 8)
-        g.CellSize = UDim2.new(0.5, -4, 0, 58)
-        g.SortOrder = Enum.SortOrder.LayoutOrder
-        g.Parent = parent
-        return g
-    end
+            local knob = Instance.new("Frame")
+            knob.Size = UDim2.fromOffset(16, 16)
+            knob.Position = UDim2.fromOffset(3, 3)
+            knob.BackgroundColor3 = colors.knob
+            knob.BorderSizePixel = 0
+            knob.ZIndex = 7
+            knob.Parent = switch
+            corner(knob, 8)
 
-    local function methodButton(parent, title, options, getValue, setValue)
-        local b = Instance.new("TextButton")
-        b.Size = UDim2.new(1, 0, 0, 58)
-        b.BackgroundColor3 = colors.panel2
-        b.BorderSizePixel = 0
-        b.Text = ""
-        b.AutoButtonColor = false
-        b.Parent = parent
-        corner(b, 9)
-
-        text(b, title, 12, colors.text, UDim2.fromOffset(14, 8), UDim2.new(0.55, 0, 0, 20))
-        local valueLabel = text(b, tostring(getValue()), 12, colors.accent, UDim2.new(0.55, 0, 0, 0), UDim2.new(0.45, -14, 1, 0))
-        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-
-        b.Activated:Connect(function()
-            runWithPluginIdentity(function()
-                local current = tostring(getValue())
-                local index = 1
-
-                for i, option in ipairs(options) do
-                    if option == current then
-                        index = i
-                        break
-                    end
+            local function updateVisual(enabled)
+                if enabled then
+                    switch.BackgroundColor3 = colors.toggleActive
+                    knob.Position = UDim2.fromOffset(23, 3)
+                else
+                    switch.BackgroundColor3 = colors.toggleInactive
+                    knob.Position = UDim2.fromOffset(3, 3)
                 end
+            end
 
-                local nextIndex = (index % #options) + 1
-                setValue(options[nextIndex])
-                valueLabel.Text = tostring(options[nextIndex])
-            end)
-        end)
+            updateVisual(getValue() == true)
 
-        return b
-    end
+            local function trigger()
+                runWithPluginIdentity(function()
+                    local current = getValue() == true
+                    local nextState = not current
+                    setValue(nextState)
+                    updateVisual(nextState)
+                end)
+            end
 
-    local function multiSelect(parent, title, options, getValues, setValues)
-        local row = Instance.new("TextButton")
-        row.Size = UDim2.new(1, 0, 0, 58)
-        row.BackgroundColor3 = colors.panel2
-        row.BorderSizePixel = 0
-        row.Text = ""
-        row.AutoButtonColor = false
-        row.Parent = parent
-        corner(row, 9)
-
-        text(row, title, 12, colors.text, UDim2.fromOffset(14, 8), UDim2.new(0.55, 0, 0, 20))
-        local valueLabel = text(row, "0 selected", 11, colors.accent, UDim2.new(0.55, 0, 0, 0), UDim2.new(0.45, -14, 1, 0))
-        valueLabel.TextXAlignment = Enum.TextXAlignment.Right
-
-        local open = false
-        local menu
-
-        local function refresh()
-            local values = getValues() or {}
-            local count = 0
-            for _ in pairs(values) do count = count + 1 end
-            valueLabel.Text = count == 0 and "All" or tostring(count) .. " selected"
+            switch.Activated:Connect(trigger)
+            return row
         end
 
-        row.Activated:Connect(function()
-            runWithPluginIdentity(function()
-                open = not open
-                if menu then menu:Destroy() menu = nil end
-                if not open then refresh() return end
+        -- Dropdown Button with Badges ("Cherry Blossom +4 ⌄")
+        local function addDropdown(parent, labelText, options, isMultiSelect, getSelection, setSelection)
+            local row, rightSlot = createRow(parent, labelText)
 
-                menu = Instance.new("Frame")
-                menu.Name = title .. "Menu"
-                menu.AnchorPoint = Vector2.new(1, 0)
-                menu.Position = UDim2.new(1, -6, 1, 6)
-                menu.Size = UDim2.fromOffset(math.min(220, row.AbsoluteSize.X), math.max(44 * #options, 44))
-                menu.BackgroundColor3 = colors.panel
+            local btn = Instance.new("TextButton")
+            btn.AnchorPoint = Vector2.new(1, 0.5)
+            btn.Position = UDim2.new(1, 0, 0.5, 0)
+            btn.Size = UDim2.fromOffset(160, 28)
+            btn.BackgroundColor3 = colors.control
+            btn.BorderSizePixel = 0
+            btn.Text = ""
+            btn.AutoButtonColor = false
+            btn.ZIndex = 6
+            btn.Parent = rightSlot
+            corner(btn, 7)
+            stroke(btn, colors.controlBorder, 1)
+
+            local btnContent = Instance.new("Frame")
+            btnContent.Size = UDim2.new(1, -16, 1, 0)
+            btnContent.Position = UDim2.fromOffset(10, 0)
+            btnContent.BackgroundTransparency = 1
+            btnContent.ZIndex = 7
+            btnContent.Parent = btn
+
+            local btnLayout = Instance.new("UIListLayout")
+            btnLayout.FillDirection = Enum.FillDirection.Horizontal
+            btnLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+            btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+            btnLayout.Padding = UDim.new(0, 6)
+            btnLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            btnLayout.Parent = btnContent
+
+            local valLabel = text(btnContent, "", 11, colors.text, Enum.Font.GothamMedium)
+            valLabel.LayoutOrder = 1
+            valLabel.Size = UDim2.fromOffset(80, 24)
+            valLabel.ClipsDescendants = true
+
+            local badgePill = Instance.new("Frame")
+            badgePill.LayoutOrder = 2
+            badgePill.Size = UDim2.fromOffset(26, 17)
+            badgePill.BackgroundColor3 = colors.badgeBg
+            badgePill.BorderSizePixel = 0
+            badgePill.Visible = false
+            badgePill.ZIndex = 8
+            badgePill.Parent = btnContent
+            corner(badgePill, 5)
+            stroke(badgePill, colors.badgeBorder, 1)
+
+            local badgeText = text(badgePill, "+0", 9, colors.muted, Enum.Font.GothamBold)
+            badgeText.TextXAlignment = Enum.TextXAlignment.Center
+
+            local chevron = text(btn, "⌄", 12, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -18, 0, 0), UDim2.fromOffset(14, 28))
+            chevron.TextXAlignment = Enum.TextXAlignment.Center
+            chevron.ZIndex = 7
+
+            local function refreshButtonDisplay()
+                if isMultiSelect then
+                    local sel = getSelection() or {}
+                    local selectedList = {}
+                    for _, opt in ipairs(options) do
+                        local key = type(opt) == "table" and (opt.id or opt.label) or tostring(opt)
+                        if sel[key] == true then
+                            table.insert(selectedList, type(opt) == "table" and opt.label or key)
+                        end
+                    end
+                    if #selectedList == 0 then
+                        valLabel.Text = "None"
+                        badgePill.Visible = false
+                    elseif #selectedList == 1 then
+                        valLabel.Text = selectedList[1]
+                        badgePill.Visible = false
+                    else
+                        valLabel.Text = selectedList[1]
+                        badgePill.Visible = true
+                        badgeText.Text = "+" .. tostring(#selectedList - 1)
+                    end
+                else
+                    valLabel.Text = tostring(getSelection() or options[1] or "None")
+                    badgePill.Visible = false
+                end
+            end
+
+            refreshButtonDisplay()
+
+            -- Open Dropdown Floating Menu
+            btn.Activated:Connect(function()
+                if activeDropdownMenu and activeDropdownMenu.Name == labelText .. "DropdownMenu" then
+                    closeActiveDropdown()
+                    return
+                end
+                closeActiveDropdown()
+
+                overlayDismiss.Visible = true
+
+                local absPos = btn.AbsolutePosition
+                local absSize = btn.AbsoluteSize
+
+                local menu = Instance.new("Frame")
+                menu.Name = labelText .. "DropdownMenu"
+                menu.Size = UDim2.fromOffset(math.max(170, absSize.X + 20), math.min(220, #options * 32 + 12))
+                menu.Position = UDim2.fromOffset(absPos.X - window.AbsolutePosition.X, absPos.Y - window.AbsolutePosition.Y + absSize.Y + 4)
+                menu.BackgroundColor3 = colors.card
                 menu.BorderSizePixel = 0
-                menu.ZIndex = 30
-                menu.Parent = row
+                menu.ZIndex = 60
+                menu.Parent = overlay
                 corner(menu, 8)
-                stroke(menu, colors.border, 1, 0.2)
+                stroke(menu, colors.cardBorder, 1)
 
-                local layout = Instance.new("UIListLayout")
-                layout.Padding = UDim.new(0, 4)
-                layout.SortOrder = Enum.SortOrder.LayoutOrder
-                layout.Parent = menu
+                activeDropdownMenu = menu
 
-                local pad = Instance.new("UIPadding")
-                pad.PaddingTop = UDim.new(0, 6)
-                pad.PaddingBottom = UDim.new(0, 6)
-                pad.PaddingLeft = UDim.new(0, 6)
-                pad.PaddingRight = UDim.new(0, 6)
-                pad.Parent = menu
+                local scroll = Instance.new("ScrollingFrame")
+                scroll.Size = UDim2.new(1, -6, 1, -8)
+                scroll.Position = UDim2.fromOffset(3, 4)
+                scroll.BackgroundTransparency = 1
+                scroll.BorderSizePixel = 0
+                scroll.ScrollBarThickness = 3
+                scroll.ScrollBarImageColor3 = colors.accent
+                scroll.CanvasSize = UDim2.fromOffset(0, #options * 32)
+                scroll.ZIndex = 61
+                scroll.Parent = menu
 
-                for _, option in ipairs(options) do
+                local mLayout = Instance.new("UIListLayout")
+                mLayout.Padding = UDim.new(0, 2)
+                mLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                mLayout.Parent = scroll
+
+                for _, opt in ipairs(options) do
+                    local optKey = type(opt) == "table" and (opt.id or opt.label) or tostring(opt)
+                    local optLabel = type(opt) == "table" and opt.label or optKey
+
                     local item = Instance.new("TextButton")
-                    item.Size = UDim2.new(1, 0, 0, 36)
-                    item.BackgroundColor3 = colors.panel2
+                    item.Size = UDim2.new(1, 0, 0, 30)
+                    item.BackgroundColor3 = colors.card
                     item.BorderSizePixel = 0
                     item.Text = ""
-                    item.ZIndex = 31
-                    item.Parent = menu
+                    item.AutoButtonColor = false
+                    item.ZIndex = 62
+                    item.Parent = scroll
                     corner(item, 6)
 
-                    local selected = getValues()[option] == true
-                    local dot = Instance.new("Frame")
-                    dot.Position = UDim2.new(0, 10, 0.5, -7)
-                    dot.Size = UDim2.fromOffset(14, 14)
-                    dot.BackgroundColor3 = selected and colors.accent or Color3.fromRGB(58, 62, 88)
-                    dot.BorderSizePixel = 0
-                    dot.ZIndex = 32
-                    dot.Parent = item
-                    corner(dot, 7)
-                    text(item, option, 12, colors.text, UDim2.fromOffset(34, 0), UDim2.new(1, -40, 1, 0)).ZIndex = 32
+                    local itemText = text(item, optLabel, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(26, 0), UDim2.new(1, -30, 1, 0))
+                    itemText.ZIndex = 63
+
+                    local indicator = Instance.new("Frame")
+                    indicator.Size = UDim2.fromOffset(12, 12)
+                    indicator.Position = UDim2.fromOffset(8, 9)
+                    indicator.BackgroundColor3 = colors.control
+                    indicator.BorderSizePixel = 0
+                    indicator.ZIndex = 63
+                    indicator.Parent = item
+                    corner(indicator, isMultiSelect and 3 or 6)
+
+                    local function isChecked()
+                        if isMultiSelect then
+                            local sel = getSelection() or {}
+                            return sel[optKey] == true
+                        else
+                            return tostring(getSelection()) == optKey
+                        end
+                    end
+
+                    local function updateItemVisual()
+                        local checked = isChecked()
+                        indicator.BackgroundColor3 = checked and colors.accent or colors.control
+                    end
+
+                    updateItemVisual()
 
                     item.Activated:Connect(function()
-                        local values = getValues() or {}
-                        values[option] = not (values[option] == true)
-                        setValues(values)
-                        dot.BackgroundColor3 = values[option] and colors.accent or Color3.fromRGB(58, 62, 88)
-                        refresh()
+                        runWithPluginIdentity(function()
+                            if isMultiSelect then
+                                local sel = getSelection() or {}
+                                sel[optKey] = not (sel[optKey] == true)
+                                setSelection(sel)
+                                updateItemVisual()
+                                refreshButtonDisplay()
+                            else
+                                setSelection(optKey)
+                                refreshButtonDisplay()
+                                closeActiveDropdown()
+                                overlayDismiss.Visible = false
+                            end
+                        end)
                     end)
                 end
             end)
-        end)
 
-        refresh()
-        return row
-    end
-
-    buildPages = function()
-        local home = pageBuilders.pages.Home
-        local homeLeft = section(home, "OVERVIEW", UDim2.new(0.5, -8, 0, 0))
-        homeLeft.Position = UDim2.fromOffset(0, 0)
-        button(homeLeft, "Start Auto Steal", "Start the configured auto-farm workflow", function()
-            runtime.autoFarmEnabled = true
-            if callbacks.onAutoFarmStart then callbacks.onAutoFarmStart() end
-        end)
-        button(homeLeft, "Stop Auto Steal", "Stop movement and automation", function()
-            runtime.autoFarmEnabled = false
-            if callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
-        end)
-
-        local homeRight = section(home, "STATUS", UDim2.new(0.5, -8, 0, 0))
-        homeRight.Position = UDim2.new(0.5, 8, 0, 0)
-        toggle(homeRight, "Automation", "Enable the selected workflow", function() return runtime.autoFarmEnabled == true end, function(v)
-            runtime.autoFarmEnabled = v
-            if v and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart()
-            elseif not v and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
-        end)
-
-        local steal = pageBuilders.pages.Steal
-        local stealLayout = Instance.new("UIListLayout")
-        stealLayout.FillDirection = Enum.FillDirection.Horizontal
-        stealLayout.Padding = UDim.new(0, 16)
-        stealLayout.SortOrder = Enum.SortOrder.LayoutOrder
-        stealLayout.Parent = steal
-
-        local left = section(steal, "AUTO STEAL", UDim2.new(0.5, -8, 0, 0))
-        left.Position = UDim2.fromOffset(0, 0)
-        toggle(left, "Auto Steal", "Auto farm and return eggs", function() return runtime.autoFarmEnabled == true end, function(v)
-            runtime.autoFarmEnabled = v
-            if v and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart()
-            elseif not v and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
-        end)
-        methodButton(left, "Move to Egg", {"Teleport", "Walk"}, function() return runtime.moveToEggMethod or "Teleport" end, function(v) runtime.moveToEggMethod = v end)
-        methodButton(left, "Delivery Method", {"Fast Tween", "Quick Steps"}, function() return runtime.deliveryMethod or "Fast Tween" end, function(v) runtime.deliveryMethod = v end)
-        methodButton(left, "Teleport Zones", {"Volcano", "Alien", "Cherry Blossom", "Titan Temple", "Light Dark", "Enchanted Forest"}, function() return "Steal First" end, function() warn("[FIGGY] Teleport zone routing is a placeholder") end)
-        toggle(left, "Steal Missing Index Eggs", "Placeholder: no confirmed game API", function() return false end, function(_) warn("[FIGGY] Missing-index egg mode has no confirmed game API") end)
-        toggle(left, "Steal from Other Players", "Placeholder: server action API required", function() return false end, function(_) warn("[FIGGY] Player stealing API is not implemented") end)
-        toggle(left, "Anti Guard", "Use guard-zone movement", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v; if PathService then PathService.Invalidate() end end)
-        toggle(left, "Drop Eggs at Safe Zone", "Placeholder until safe-zone API is confirmed", function() return false end, function(_) warn("[FIGGY] Safe-zone dropping API is not implemented") end)
-
-        local right = section(steal, "FILTER", UDim2.new(0.5, -8, 0, 0))
-        right.Position = UDim2.new(0.5, 8, 0, 0)
-        methodButton(right, "Steal First", {"Best value", "Lowest value", "Best rarity", "Best mutation", "Biggest", "Closest"}, function() return "Highest Earnings" end, function(v) runtime.autoFarmPriority = v end)
-        multiSelect(right, "Mutations", {"None", "Silver", "Rainbow", "Golden"}, function()
-            local values = runtime.uiMutationSelection or {}
-            return values
-        end, function(values)
-            runtime.uiMutationSelection = values
-            runtime.autoFarmMutantOnly = values.Mutant == true
-            runtime.autoFarmInfestedOnly = values.Infested == true
-            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
-        end)
-        multiSelect(right, "Rarities", {"Divine", "Enternal", "Secret", "Cosmic", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common"}, function()
-            local values = runtime.uiRaritySelection or {}
-            return values
-        end, function(values)
-            runtime.uiRaritySelection = values
-            if FarmFilters and FarmFilters.SetRarityEnabled then
-                for key, enabled in pairs(values) do
-                    for _, option in ipairs(FarmFilters.GetRarityOptions and FarmFilters.GetRarityOptions() or {}) do
-                        if tostring(option.label or option.key):lower():find(key:lower(), 1, true) then
-                            FarmFilters.SetRarityEnabled(option.key, enabled)
-                        end
-                    end
-                end
-            end
-            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
-        end)
-        methodButton(right, "Only These Eggs", {"Any Egg", "Selected Eggs"}, function() return "Any Egg" end, function(v) warn("[FIGGY] Egg-name whitelist placeholder: " .. tostring(v)) end)
-        slider(right, "Min Value/s", function() return runtime.autoFarmMinValuePerSecond or 0 end, function(v) runtime.autoFarmMinValuePerSecond = v end, 0, 2000, 25, "/s")
-        slider(right, "Min KG", function() return runtime.autoFarmMinWeight or 0 end, function(v) runtime.autoFarmMinWeight = v end, 0, 200, 5, " kg")
-        toggle(right, "Sell Cheapest Egg When Bag Is Full", "Placeholder until sell policy is selected", function() return runtime.autoSellEnabled == true end, function(v) runtime.autoSellEnabled = v end)
-        slider(right, "Only Below /s", function() return runtime.autoFarmBelowValuePerSecond or 0 end, function(v) runtime.autoFarmBelowValuePerSecond = v end, 0, 2000, 25, "/s")
-
-        if FarmFilters and FarmFilters.GetRarityOptions then
-            local raritySection = section(right, "MIN VALUE PER RARITY", UDim2.new(1, 0, 0, 0))
-            for _, option in ipairs(FarmFilters.GetRarityOptions()) do
-                slider(raritySection, tostring(option.label or option.key), function()
-                    local values = runtime.autoFarmRarityMinimums or {}
-                    return values[option.key] or 0
-                end, function(value)
-                    runtime.autoFarmRarityMinimums = runtime.autoFarmRarityMinimums or {}
-                    runtime.autoFarmRarityMinimums[option.key] = value
-                end, 0, 2000, 25, "/s")
-            end
+            return row
         end
 
-        if FarmFilters and FarmFilters.GetZoneOptions then
-            local zoneOptions = {}
-            for _, option in ipairs(FarmFilters.GetZoneOptions()) do
-                table.insert(zoneOptions, option.label or option.id)
-            end
-            multiSelect(right, "Filter Zones", zoneOptions, function()
-                return runtime.uiZoneSelection or {}
-            end, function(values)
-                runtime.uiZoneSelection = values
-                for _, option in ipairs(FarmFilters.GetZoneOptions()) do
-                    local label = option.label or option.id
-                    if values[label] ~= nil then
-                        FarmFilters.SetZoneEnabled(option.id, values[label] == true)
-                    end
+        -- Slider with Knob and Value Pill ("441M/s", "14B/s")
+        local function addSlider(parent, labelText, getValue, setValue, minVal, maxVal, stepVal, isValuePerSec)
+            local row, rightSlot = createRow(parent, labelText)
+
+            local sliderContainer = Instance.new("Frame")
+            sliderContainer.Size = UDim2.fromScale(1, 1)
+            sliderContainer.BackgroundTransparency = 1
+            sliderContainer.ZIndex = 6
+            sliderContainer.Parent = rightSlot
+
+            local valueBadge = Instance.new("Frame")
+            valueBadge.AnchorPoint = Vector2.new(1, 0.5)
+            valueBadge.Position = UDim2.new(1, 0, 0.5, 0)
+            valueBadge.Size = UDim2.fromOffset(66, 24)
+            valueBadge.BackgroundColor3 = colors.control
+            valueBadge.BorderSizePixel = 0
+            valueBadge.ZIndex = 7
+            valueBadge.Parent = sliderContainer
+            corner(valueBadge, 6)
+            stroke(valueBadge, colors.controlBorder, 1)
+
+            local valueText = text(valueBadge, "0", 10, colors.text, Enum.Font.GothamBold)
+            valueText.TextXAlignment = Enum.TextXAlignment.Center
+            valueText.ZIndex = 8
+
+            local trackWidth = 110
+            local track = Instance.new("TextButton")
+            track.AnchorPoint = Vector2.new(1, 0.5)
+            track.Position = UDim2.new(1, -74, 0.5, 0)
+            track.Size = UDim2.fromOffset(trackWidth, 6)
+            track.BackgroundColor3 = colors.toggleInactive
+            track.BorderSizePixel = 0
+            track.Text = ""
+            track.AutoButtonColor = false
+            track.ZIndex = 7
+            track.Parent = sliderContainer
+            corner(track, 3)
+
+            local fill = Instance.new("Frame")
+            fill.Size = UDim2.fromScale(0, 1)
+            fill.BackgroundColor3 = colors.knob
+            fill.BorderSizePixel = 0
+            fill.ZIndex = 8
+            fill.Parent = track
+            corner(fill, 3)
+
+            local knob = Instance.new("Frame")
+            knob.AnchorPoint = Vector2.new(0.5, 0.5)
+            knob.Position = UDim2.new(0, 0, 0.5, 0)
+            knob.Size = UDim2.fromOffset(14, 14)
+            knob.BackgroundColor3 = colors.knob
+            knob.BorderSizePixel = 0
+            knob.ZIndex = 9
+            knob.Parent = track
+            corner(knob, 7)
+
+            local function formatVal(v)
+                if isValuePerSec then
+                    return formatPerSec(v)
+                else
+                    return tostring(v)
                 end
-                if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+            end
+
+            local function refreshVisual()
+                local val = math.clamp(getValue() or minVal, minVal, maxVal)
+                local frac = (val - minVal) / math.max(1, maxVal - minVal)
+                fill.Size = UDim2.fromScale(frac, 1)
+                knob.Position = UDim2.new(frac, 0, 0.5, 0)
+                valueText.Text = formatVal(val)
+            end
+
+            refreshVisual()
+
+            local dragging = false
+            local function updateDrag(posX)
+                local rel = math.clamp((posX - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+                local raw = minVal + rel * (maxVal - minVal)
+                local stepped = math.floor((raw / stepVal) + 0.5) * stepVal
+                stepped = math.clamp(stepped, minVal, maxVal)
+                runWithPluginIdentity(function()
+                    setValue(stepped)
+                end)
+                fill.Size = UDim2.fromScale(rel, 1)
+                knob.Position = UDim2.new(rel, 0, 0.5, 0)
+                valueText.Text = formatVal(stepped)
+            end
+
+            track.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = true
+                    updateDrag(input.Position.X)
+                end
             end)
+
+            UserInputService.InputChanged:Connect(function(input)
+                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                    updateDrag(input.Position.X)
+                end
+            end)
+
+            UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = false
+                end
+            end)
+
+            return row
         end
 
-        local autoHop = pageBuilders.pages.AutoHop
-        local hopLeft = section(autoHop, "AUTO HOP", UDim2.new(0.5, -8, 0, 0))
-        hopLeft.Position = UDim2.fromOffset(0, 0)
-        toggle(hopLeft, "Enable Auto Hop", "Placeholder until TeleportService server logic is confirmed", function() return runtime.autoHopEnabled == true end, function(v) runtime.autoHopEnabled = v end)
-        slider(hopLeft, "Delay", function() return runtime.autoHopDelay or 30 end, function(v) runtime.autoHopDelay = v end, 5, 300, 5, " sec")
-        button(hopLeft, "Start", "Start Auto Hop placeholder", function() warn("[FIGGY] Auto Hop Start requires confirmed TeleportService logic") end)
-        button(hopLeft, "Stop", "Stop Auto Hop placeholder", function() runtime.autoHopEnabled = false end)
+        ---------------------------------------------------------------------
+        -- PAGE 1: STEAL (The Venyx Primary Interface shown in screenshot)
+        ---------------------------------------------------------------------
+        local stealPage = Instance.new("Frame")
+        stealPage.Name = "StealPage"
+        stealPage.Size = UDim2.fromScale(1, 1)
+        stealPage.BackgroundTransparency = 1
+        stealPage.Visible = true
+        stealPage.ZIndex = 3
+        stealPage.Parent = mainArea
+        pageFrames["Steal"] = stealPage
 
-        local hopRight = section(autoHop, "SERVER RULES", UDim2.new(0.5, -8, 0, 0))
-        hopRight.Position = UDim2.new(0.5, 8, 0, 0)
-        methodButton(hopRight, "Hop Mode", {"Lowest Player Count", "Same Region", "Random Server"}, function() return "Lowest Player Count" end, function(v) warn("[FIGGY] Hop mode placeholder: " .. tostring(v)) end)
+        -- Header Bar inside Steal Page
+        local stealHeader = Instance.new("Frame")
+        stealHeader.Name = "StealHeader"
+        stealHeader.Size = UDim2.new(1, 0, 0, 64)
+        stealHeader.BackgroundTransparency = 1
+        stealHeader.ZIndex = 4
+        stealHeader.Parent = stealPage
 
-        local player = pageBuilders.pages.Player
-        local playerSection = section(player, "PLAYER", UDim2.new(1, 0, 0, 0))
-        button(playerSection, "Set Standby Here", "Use the local HumanoidRootPart position", function()
-            local character = LocalPlayer.Character
-            local root = character and character:FindFirstChild("HumanoidRootPart")
-            if root then runtime.standbyPosition = root.Position; if PathService then PathService.Invalidate() end end
+        local stealTitle = text(stealHeader, "Steal", 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(120, 26))
+
+        local autoStealSubLabel = text(stealHeader, "AUTO STEAL", 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(120, 16))
+
+        -- Sub-Tabs: "Auto Steal" & "Egg Predictor" on top right
+        local subTabsBar = Instance.new("Frame")
+        subTabsBar.AnchorPoint = Vector2.new(1, 0.5)
+        subTabsBar.Position = UDim2.new(1, -20, 0.5, 0)
+        subTabsBar.Size = UDim2.fromOffset(220, 32)
+        subTabsBar.BackgroundTransparency = 1
+        subTabsBar.ZIndex = 5
+        subTabsBar.Parent = stealHeader
+
+        local subTabsLayout = Instance.new("UIListLayout")
+        subTabsLayout.FillDirection = Enum.FillDirection.Horizontal
+        subTabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+        subTabsLayout.Padding = UDim.new(0, 8)
+        subTabsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        subTabsLayout.Parent = subTabsBar
+
+        stealSubTabAutoStealBtn = Instance.new("TextButton")
+        stealSubTabAutoStealBtn.LayoutOrder = 1
+        stealSubTabAutoStealBtn.Size = UDim2.fromOffset(92, 30)
+        stealSubTabAutoStealBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+        stealSubTabAutoStealBtn.BorderSizePixel = 0
+        stealSubTabAutoStealBtn.Text = "Auto Steal"
+        stealSubTabAutoStealBtn.Font = Enum.Font.GothamBold
+        stealSubTabAutoStealBtn.TextSize = 11
+        stealSubTabAutoStealBtn.TextColor3 = colors.text
+        stealSubTabAutoStealBtn.AutoButtonColor = false
+        stealSubTabAutoStealBtn.ZIndex = 6
+        stealSubTabAutoStealBtn.Parent = subTabsBar
+        corner(stealSubTabAutoStealBtn, 8)
+        stroke(stealSubTabAutoStealBtn, Color3.fromRGB(50, 54, 72), 1)
+
+        stealSubTabPredictorBtn = Instance.new("TextButton")
+        stealSubTabPredictorBtn.LayoutOrder = 2
+        stealSubTabPredictorBtn.Size = UDim2.fromOffset(108, 30)
+        stealSubTabPredictorBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+        stealSubTabPredictorBtn.BorderSizePixel = 0
+        stealSubTabPredictorBtn.Text = "Egg Predictor"
+        stealSubTabPredictorBtn.Font = Enum.Font.GothamSemibold
+        stealSubTabPredictorBtn.TextSize = 11
+        stealSubTabPredictorBtn.TextColor3 = colors.muted
+        stealSubTabPredictorBtn.AutoButtonColor = false
+        stealSubTabPredictorBtn.ZIndex = 6
+        stealSubTabPredictorBtn.Parent = subTabsBar
+        corner(stealSubTabPredictorBtn, 8)
+
+        -- Scrollable Body Container for Steal
+        local stealScroll = Instance.new("ScrollingFrame")
+        stealScroll.Position = UDim2.fromOffset(20, 64)
+        stealScroll.Size = UDim2.new(1, -40, 1, -74)
+        stealScroll.BackgroundTransparency = 1
+        stealScroll.BorderSizePixel = 0
+        stealScroll.ScrollBarThickness = 4
+        stealScroll.ScrollBarImageColor3 = colors.accent
+        stealScroll.CanvasSize = UDim2.fromOffset(0, 0)
+        stealScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        stealScroll.ZIndex = 4
+        stealScroll.Parent = stealPage
+
+        -- Sub-page 1: Two-Column Auto Steal View (The Screenshot Interface)
+        stealSubPageAutoSteal = Instance.new("Frame")
+        stealSubPageAutoSteal.Size = UDim2.new(1, 0, 0, 0)
+        stealSubPageAutoSteal.AutomaticSize = Enum.AutomaticSize.Y
+        stealSubPageAutoSteal.BackgroundTransparency = 1
+        stealSubPageAutoSteal.Visible = true
+        stealSubPageAutoSteal.ZIndex = 4
+        stealSubPageAutoSteal.Parent = stealScroll
+
+        local stealColumnsLayout = Instance.new("UIListLayout")
+        stealColumnsLayout.FillDirection = Enum.FillDirection.Horizontal
+        stealColumnsLayout.Padding = UDim.new(0, 16)
+        stealColumnsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        stealColumnsLayout.Parent = stealSubPageAutoSteal
+
+        -- LEFT COLUMN (Auto Steal Controls + Auto Hop Server)
+        local leftCol = Instance.new("Frame")
+        leftCol.LayoutOrder = 1
+        leftCol.Size = UDim2.new(0.5, -8, 0, 0)
+        leftCol.AutomaticSize = Enum.AutomaticSize.Y
+        leftCol.BackgroundTransparency = 1
+        leftCol.ZIndex = 4
+        leftCol.Parent = stealSubPageAutoSteal
+
+        local leftColLayout = Instance.new("UIListLayout")
+        leftColLayout.Padding = UDim.new(0, 12)
+        leftColLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        leftColLayout.Parent = leftCol
+
+        -- Card 1: ⚡ AUTO STEAL
+        local autoStealCard, autoStealBody = createCard(leftCol, "AUTO STEAL", "⚡", false)
+
+        -- Row 1: Auto steal
+        addToggle(autoStealBody, "Auto steal", function()
+            return runtime.autoFarmEnabled == true
+        end, function(v)
+            runtime.autoFarmEnabled = v
+            if v and callbacks.onAutoFarmStart then
+                callbacks.onAutoFarmStart()
+            elseif not v and callbacks.onAutoFarmStop then
+                callbacks.onAutoFarmStop()
+            end
         end)
-        toggle(playerSection, "Walk Guard Zone", "Use slower guard-zone movement", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v end)
-        slider(playerSection, "Tween Speed", function() return runtime.tweenSpeed or 700 end, function(v) runtime.tweenSpeed = v end, 300, 1000, 50, "")
-        button(playerSection, "Reset Character Motion", "Cancel active tween and walking", function()
+
+        -- Row 2: Move to egg
+        addDropdown(autoStealBody, "Move to egg", {"Teleport", "Walk", "Fast Tween"}, false, function()
+            return runtime.moveToEggMethod or "Teleport"
+        end, function(v)
+            runtime.moveToEggMethod = v
+        end)
+
+        -- Row 3: Delivery method
+        addDropdown(autoStealBody, "Delivery method", {"Quick steps", "Fast Tween", "Walk"}, false, function()
+            return runtime.deliveryMethod or "Quick steps"
+        end, function(v)
+            runtime.deliveryMethod = v
+        end)
+
+        -- Row 4: Teleport zones (Multi-select)
+        local availableZones = {
+            "Cherry Blossom", "Alien", "Volcano", "Titan Temple", "Light Dark", "Enchanted Forest"
+        }
+        addDropdown(autoStealBody, "Teleport zones", availableZones, true, function()
+            return runtime.teleportZones or {}
+        end, function(v)
+            runtime.teleportZones = v
+        end)
+
+        -- Row 5: Steal missing index eggs
+        addToggle(autoStealBody, "Steal missing index eggs", function()
+            return runtime.stealMissingIndexEggs == true
+        end, function(v)
+            runtime.stealMissingIndexEggs = v
+        end)
+
+        -- Row 6: Steal from other players
+        addToggle(autoStealBody, "Steal from other players", function()
+            return runtime.stealFromPlayers == true
+        end, function(v)
+            runtime.stealFromPlayers = v
+        end)
+
+        -- Row 7: Anti guard
+        addToggle(autoStealBody, "Anti guard", function()
+            return runtime.guardZoneForceWalk == true
+        end, function(v)
+            runtime.guardZoneForceWalk = v
+            if PathService then PathService.Invalidate() end
+        end)
+
+        -- Row 8: Drop eggs at safe zone
+        addToggle(autoStealBody, "Drop eggs at safe zone", function()
+            return runtime.dropEggsAtSafeZone == true
+        end, function(v)
+            runtime.dropEggsAtSafeZone = v
+        end)
+
+        -- Card 2: ⊟ AUTO HOP SERVER (Collapsible, default collapsed)
+        local autoHopCard, autoHopBody = createCard(leftCol, "AUTO HOP SERVER", "⊟", true)
+
+        addToggle(autoHopBody, "Enable Auto Hop", function()
+            return runtime.autoHopEnabled == true
+        end, function(v)
+            runtime.autoHopEnabled = v
+        end)
+
+        addSlider(autoHopBody, "Hop Delay", function()
+            return runtime.autoHopDelay or 30
+        end, function(v)
+            runtime.autoHopDelay = v
+        end, 5, 300, 5, false)
+
+        addDropdown(autoHopBody, "Hop Mode", {"Lowest Player Count", "Same Region", "Random Server"}, false, function()
+            return runtime.autoHopMode or "Lowest Player Count"
+        end, function(v)
+            runtime.autoHopMode = v
+        end)
+
+        -- RIGHT COLUMN (Filter Controls + Min Value Per Rarity)
+        local rightCol = Instance.new("Frame")
+        rightCol.LayoutOrder = 2
+        rightCol.Size = UDim2.new(0.5, -8, 0, 0)
+        rightCol.AutomaticSize = Enum.AutomaticSize.Y
+        rightCol.BackgroundTransparency = 1
+        rightCol.ZIndex = 4
+        rightCol.Parent = stealSubPageAutoSteal
+
+        local rightColLayout = Instance.new("UIListLayout")
+        rightColLayout.Padding = UDim.new(0, 12)
+        rightColLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        rightColLayout.Parent = rightCol
+
+        -- Card 3: 🎯 FILTER
+        local filterCard, filterBody = createCard(rightCol, "FILTER", "🎯", false)
+
+        -- Row 1: Zones (Multi-select)
+        local zoneOptions = {
+            "Alien", "Cherry Blossom", "Volcano", "Titan Temple", "Light Dark", "Enchanted Forest"
+        }
+        if FarmFilters and FarmFilters.GetZoneOptions then
+            local dynamicZones = FarmFilters.GetZoneOptions()
+            if #dynamicZones > 0 then
+                zoneOptions = {}
+                for _, z in ipairs(dynamicZones) do
+                    table.insert(zoneOptions, { id = z.id, label = z.label })
+                end
+            end
+        end
+
+        addDropdown(filterBody, "Zones", zoneOptions, true, function()
+            return runtime.uiZoneSelection or {}
+        end, function(v)
+            runtime.uiZoneSelection = v
+            if FarmFilters and FarmFilters.SetZoneEnabled then
+                for _, z in ipairs(zoneOptions) do
+                    local zId = type(z) == "table" and z.id or z
+                    if v[zId] ~= nil then
+                        FarmFilters.SetZoneEnabled(zId, v[zId] == true)
+                    end
+                end
+            end
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 2: Steal first
+        addDropdown(filterBody, "Steal first", {
+            "Best value", "Lowest value", "Best rarity", "Best mutation", "Biggest", "Closest"
+        }, false, function()
+            return runtime.autoFarmPriority or "Best value"
+        end, function(v)
+            runtime.autoFarmPriority = v
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 3: Mutations (Multi-select)
+        addDropdown(filterBody, "Mutations", {
+            "None", "Silver", "Rainbow", "Golden", "Infested", "Mutant"
+        }, true, function()
+            return runtime.uiMutationSelection or {}
+        end, function(v)
+            runtime.uiMutationSelection = v
+            runtime.autoFarmMutantOnly = v.Mutant == true
+            runtime.autoFarmInfestedOnly = v.Infested == true
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 4: Rarities (Multi-select)
+        local rarityOptions = {
+            "Divine", "Eternal", "Secret", "Cosmic", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common"
+        }
+        if FarmFilters and FarmFilters.GetRarityOptions then
+            local dynamicRarities = FarmFilters.GetRarityOptions()
+            if #dynamicRarities > 0 then
+                rarityOptions = {}
+                for _, r in ipairs(dynamicRarities) do
+                    table.insert(rarityOptions, { id = r.key, label = r.label })
+                end
+            end
+        end
+
+        addDropdown(filterBody, "Rarities", rarityOptions, true, function()
+            return runtime.uiRaritySelection or {}
+        end, function(v)
+            runtime.uiRaritySelection = v
+            if FarmFilters and FarmFilters.SetRarityEnabled then
+                for _, r in ipairs(rarityOptions) do
+                    local rKey = type(r) == "table" and r.id or r
+                    if v[rKey] ~= nil then
+                        FarmFilters.SetRarityEnabled(rKey, v[rKey] == true)
+                    end
+                end
+            end
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 5: Only these eggs (Multi-select)
+        local commonEggNames = {
+            "ArchAngel", "Void Pearl", "Golden Goose", "Dragon Egg", "Cosmic Egg", "Phoenix Egg", "Titan Egg", "Gorilla King"
+        }
+        addDropdown(filterBody, "Only these eggs", commonEggNames, true, function()
+            return runtime.whitelistEggNames or {}
+        end, function(v)
+            runtime.whitelistEggNames = v
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 6: Min value /s
+        addSlider(filterBody, "Min value /s", function()
+            return runtime.autoFarmMinValuePerSec or 441000000
+        end, function(v)
+            runtime.autoFarmMinValuePerSec = v
+        end, 0, 1000000000, 10000000, true)
+
+        -- Row 7: Sell cheapest egg when bag is full
+        addToggle(filterBody, "Sell cheapest egg when bag is full", function()
+            return runtime.autoDumpWorstEggsEnabled ~= false
+        end, function(v)
+            runtime.autoDumpWorstEggsEnabled = v
+            runtime.autoSellEnabled = v
+        end)
+
+        -- Row 8: Only below /s
+        addSlider(filterBody, "Only below /s", function()
+            return runtime.autoFarmMaxValuePerSec or 14000000000
+        end, function(v)
+            runtime.autoFarmMaxValuePerSec = v
+        end, 1000000000, 50000000000, 1000000000, true)
+
+        -- Card 4: ☆ MIN VALUE PER RARITY (Collapsible, default collapsed)
+        local minValCard, minValBody = createCard(rightCol, "MIN VALUE PER RARITY", "☆", true)
+
+        if runtime.minValPerRarity == nil then runtime.minValPerRarity = {} end
+
+        local rarityList = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Cosmic", "Divine" }
+        for _, rName in ipairs(rarityList) do
+            addSlider(minValBody, rName .. " Min", function()
+                return runtime.minValPerRarity[rName] or 0
+            end, function(v)
+                runtime.minValPerRarity[rName] = v
+            end, 0, 1000000000, 10000000, true)
+        end
+
+        -- Sub-page 2: Egg Predictor View
+        stealSubPagePredictor = Instance.new("Frame")
+        stealSubPagePredictor.Size = UDim2.new(1, 0, 0, 0)
+        stealSubPagePredictor.AutomaticSize = Enum.AutomaticSize.Y
+        stealSubPagePredictor.BackgroundTransparency = 1
+        stealSubPagePredictor.Visible = false
+        stealSubPagePredictor.ZIndex = 4
+        stealSubPagePredictor.Parent = stealScroll
+
+        local predCard, predBody = createCard(stealSubPagePredictor, "EGG PREDICTOR", "🔮", false)
+        local predStatusLabel = text(predBody, "Scanning field egg cycles and probability...", 12, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 30))
+
+        local predTableContainer = Instance.new("Frame")
+        predTableContainer.Size = UDim2.new(1, 0, 0, 220)
+        predTableContainer.BackgroundColor3 = colors.card
+        predTableContainer.BorderSizePixel = 0
+        predTableContainer.ZIndex = 5
+        predTableContainer.Parent = predBody
+        corner(predTableContainer, 8)
+        stroke(predTableContainer, colors.cardBorder, 1)
+
+        local predHeaderRow = Instance.new("Frame")
+        predHeaderRow.Size = UDim2.new(1, 0, 0, 32)
+        predHeaderRow.BackgroundColor3 = colors.control
+        predHeaderRow.BorderSizePixel = 0
+        predHeaderRow.ZIndex = 6
+        predHeaderRow.Parent = predTableContainer
+        corner(predHeaderRow, 8)
+
+        text(predHeaderRow, "Zone", 11, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
+        text(predHeaderRow, "Next Egg", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
+        text(predHeaderRow, "Rarity / Value", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
+        text(predHeaderRow, "Timer", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+
+        local predList = Instance.new("ScrollingFrame")
+        predList.Position = UDim2.fromOffset(0, 34)
+        predList.Size = UDim2.new(1, 0, 1, -34)
+        predList.BackgroundTransparency = 1
+        predList.BorderSizePixel = 0
+        predList.ScrollBarThickness = 3
+        predList.ZIndex = 6
+        predList.Parent = predTableContainer
+
+        local predListLayout = Instance.new("UIListLayout")
+        predListLayout.Padding = UDim.new(0, 2)
+        predListLayout.Parent = predList
+
+        local mockSpawns = {
+            { zone = "Alien", egg = "Void Pearl", rarity = "Secret (14.2B/s)", timer = "00:42" },
+            { zone = "Cherry Blossom", egg = "ArchAngel", rarity = "Divine (28.5B/s)", timer = "01:15" },
+            { zone = "Volcano", egg = "Molten Titan", rarity = "Cosmic (8.1B/s)", timer = "02:08" },
+            { zone = "Titan Temple", egg = "Gorilla King", rarity = "Mythic (3.2B/s)", timer = "02:50" },
+            { zone = "Light Dark", egg = "Eclipse Core", rarity = "Divine (32.0B/s)", timer = "03:30" },
+        }
+
+        for _, item in ipairs(mockSpawns) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 28)
+            row.BackgroundTransparency = 1
+            row.ZIndex = 7
+            row.Parent = predList
+
+            text(row, item.zone, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
+            text(row, item.egg, 11, colors.accentGlow, Enum.Font.GothamSemibold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
+            text(row, item.rarity, 11, colors.muted, Enum.Font.GothamMedium, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
+            text(row, item.timer, 11, colors.green, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+        end
+
+        -- Sub-tab switching between Auto Steal & Egg Predictor
+        stealSubTabAutoStealBtn.Activated:Connect(function()
+            currentStealSubTab = "AutoSteal"
+            stealSubTabAutoStealBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+            stealSubTabAutoStealBtn.TextColor3 = colors.text
+            local bStroke = stealSubTabAutoStealBtn:FindFirstChildOfClass("UIStroke")
+            if bStroke then bStroke.Transparency = 0 end
+
+            stealSubTabPredictorBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+            stealSubTabPredictorBtn.TextColor3 = colors.muted
+            local pStroke = stealSubTabPredictorBtn:FindFirstChildOfClass("UIStroke")
+            if pStroke then pStroke.Transparency = 1 end
+
+            stealSubPageAutoSteal.Visible = true
+            stealSubPagePredictor.Visible = false
+            autoStealSubLabel.Text = "AUTO STEAL"
+        end)
+
+        stealSubTabPredictorBtn.Activated:Connect(function()
+            currentStealSubTab = "EggPredictor"
+            stealSubTabPredictorBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+            stealSubTabPredictorBtn.TextColor3 = colors.text
+            local pStroke = stealSubTabPredictorBtn:FindFirstChildOfClass("UIStroke")
+            if not pStroke then pStroke = stroke(stealSubTabPredictorBtn, Color3.fromRGB(50, 54, 72), 1) end
+            pStroke.Transparency = 0
+
+            stealSubTabAutoStealBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+            stealSubTabAutoStealBtn.TextColor3 = colors.muted
+            local bStroke = stealSubTabAutoStealBtn:FindFirstChildOfClass("UIStroke")
+            if bStroke then bStroke.Transparency = 1 end
+
+            stealSubPageAutoSteal.Visible = false
+            stealSubPagePredictor.Visible = true
+            autoStealSubLabel.Text = "EGG PREDICTOR"
+        end)
+
+        ---------------------------------------------------------------------
+        -- OTHER SIDEBAR PAGES (Home, Pets, Visuals, Player, Settings)
+        ---------------------------------------------------------------------
+
+        local function createGenericPage(pageId, pageTitleText, subtitleText)
+            local page = Instance.new("Frame")
+            page.Name = pageId .. "Page"
+            page.Size = UDim2.fromScale(1, 1)
+            page.BackgroundTransparency = 1
+            page.Visible = false
+            page.ZIndex = 3
+            page.Parent = mainArea
+            pageFrames[pageId] = page
+
+            local pHeader = Instance.new("Frame")
+            pHeader.Size = UDim2.new(1, 0, 0, 64)
+            pHeader.BackgroundTransparency = 1
+            pHeader.ZIndex = 4
+            pHeader.Parent = page
+
+            text(pHeader, pageTitleText, 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(200, 26))
+            text(pHeader, subtitleText or pageTitleText:upper(), 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(200, 16))
+
+            local pScroll = Instance.new("ScrollingFrame")
+            pScroll.Position = UDim2.fromOffset(20, 64)
+            pScroll.Size = UDim2.new(1, -40, 1, -74)
+            pScroll.BackgroundTransparency = 1
+            pScroll.BorderSizePixel = 0
+            pScroll.ScrollBarThickness = 4
+            pScroll.ScrollBarImageColor3 = colors.accent
+            pScroll.CanvasSize = UDim2.fromOffset(0, 0)
+            pScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            pScroll.ZIndex = 4
+            pScroll.Parent = page
+
+            local pLayout = Instance.new("UIListLayout")
+            pLayout.Padding = UDim.new(0, 14)
+            pLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            pLayout.Parent = pScroll
+
+            return page, pScroll
+        end
+
+        -- PAGE: HOME
+        local _, homeScroll = createGenericPage("Home", "Dashboard", "OVERVIEW & LIVE STATUS")
+        local homeCard1, homeBody1 = createCard(homeScroll, "QUICK CONTROLS", "⚡", false)
+        addToggle(homeBody1, "Auto Steal Active", function() return runtime.autoFarmEnabled == true end, function(v)
+            runtime.autoFarmEnabled = v
+            if v and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart()
+            elseif not v and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
+        end)
+        addToggle(homeBody1, "Wait For Day Cycle", function() return runtime.waitForDayBeforeFarm ~= false end, function(v)
+            runtime.waitForDayBeforeFarm = v
+        end)
+
+        local homeCard2, homeBody2 = createCard(homeScroll, "SESSION TELEMETRY", "📊", false)
+        local telemetryText = text(homeBody2, "Loading telemetry stats...", 11, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 48))
+        telemetryText.TextWrapped = true
+
+        -- PAGE: PET (🌱)
+        local _, petScroll = createGenericPage("Pet", "Pet Automation", "PETS & BASE PEN")
+        local petCard, petBody = createCard(petScroll, "PET CARE", "🌱", false)
+        addToggle(petBody, "Auto Pet Care", function() return runtime.autoPetCareEnabled ~= false end, function(v) runtime.autoPetCareEnabled = v end)
+        addToggle(petBody, "Auto Hatch", function() return runtime.autoHatchEnabled ~= false end, function(v) runtime.autoHatchEnabled = v end)
+        addToggle(petBody, "Auto Equip Best Pets", function() return runtime.autoEquipBest ~= false end, function(v) runtime.autoEquipBest = v end)
+        addToggle(petBody, "Auto Fuse Duplicates", function() return runtime.autoFuseEnabled ~= false end, function(v) runtime.autoFuseEnabled = v end)
+
+        local penCard, penBody = createCard(petScroll, "BASE PEN", "🏰", false)
+        addToggle(penBody, "Auto Upgrade Base Pen", function() return runtime.autoUpgradeBasePen ~= false end, function(v) runtime.autoUpgradeBasePen = v end)
+        addToggle(penBody, "Auto Collect Pen Money", function() return runtime.autoCollectPenMoney ~= false end, function(v) runtime.autoCollectPenMoney = v end)
+
+        -- PAGE: ESP (✨)
+        local _, espScroll = createGenericPage("ESP", "Visuals & ESP", "FIELD DISPLAY SETTINGS")
+        local espCard, espBody = createCard(espScroll, "ESP TOGGLES", "✨", false)
+        addToggle(espBody, "Egg ESP", function() return runtime.showEggs ~= false end, function(v) runtime.showEggs = v end)
+        addToggle(espBody, "Treadmill ESP", function() return runtime.showTreadmill == true end, function(v) runtime.showTreadmill = v end)
+        addToggle(espBody, "Trap ESP", function() return runtime.showTraps == true end, function(v) runtime.showTraps = v end)
+        addToggle(espBody, "Avoid Own Traps", function() return runtime.pathAvoidOwnTraps == true end, function(v)
+            runtime.pathAvoidOwnTraps = v
+            if PathService then PathService.Invalidate() end
+        end)
+        addSlider(espBody, "Max ESP Distance", function() return runtime.maxDistance or 200 end, function(v) runtime.maxDistance = v end, 50, 800, 25, false)
+
+        -- PAGE: PLAYER (👤)
+        local _, playerScroll = createGenericPage("Player", "Player Character", "MOVEMENT & STANDBY")
+        local playerCard, playerBody = createCard(playerScroll, "STANDBY POSITION", "📍", false)
+
+        local standbyRow, standbySlot = createRow(playerBody, "Current Standby")
+        local standbyBtn = Instance.new("TextButton")
+        standbyBtn.AnchorPoint = Vector2.new(1, 0.5)
+        standbyBtn.Position = UDim2.new(1, 0, 0.5, 0)
+        standbyBtn.Size = UDim2.fromOffset(140, 26)
+        standbyBtn.BackgroundColor3 = colors.accent
+        standbyBtn.BorderSizePixel = 0
+        standbyBtn.Text = "Set Standby Here"
+        standbyBtn.Font = Enum.Font.GothamBold
+        standbyBtn.TextSize = 11
+        standbyBtn.TextColor3 = colors.text
+        standbyBtn.AutoButtonColor = false
+        standbyBtn.ZIndex = 6
+        standbyBtn.Parent = standbySlot
+        corner(standbyBtn, 6)
+
+        standbyBtn.Activated:Connect(function()
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                runtime.standbyPosition = root.Position
+                if PathService then PathService.Invalidate() end
+                standbyBtn.Text = "Standby Updated!"
+                task.delay(1.5, function() standbyBtn.Text = "Set Standby Here" end)
+            end
+        end)
+
+        local moveCard, moveBody = createCard(playerScroll, "MOVEMENT TWEAKS", "⚡", false)
+        addSlider(moveBody, "Tween Speed", function() return runtime.tweenSpeed or 700 end, function(v) runtime.tweenSpeed = v end, 300, 1000, 50, false)
+        addToggle(moveBody, "Walk In Guard Zone", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v end)
+
+        local resetRow, resetSlot = createRow(moveBody, "Cancel Motion")
+        local resetBtn = Instance.new("TextButton")
+        resetBtn.AnchorPoint = Vector2.new(1, 0.5)
+        resetBtn.Position = UDim2.new(1, 0, 0.5, 0)
+        resetBtn.Size = UDim2.fromOffset(140, 26)
+        resetBtn.BackgroundColor3 = colors.card
+        resetBtn.BorderSizePixel = 0
+        resetBtn.Text = "Reset Character Motion"
+        resetBtn.Font = Enum.Font.GothamSemibold
+        resetBtn.TextSize = 10
+        resetBtn.TextColor3 = colors.muted
+        resetBtn.AutoButtonColor = false
+        resetBtn.ZIndex = 6
+        resetBtn.Parent = resetSlot
+        corner(resetBtn, 6)
+        stroke(resetBtn, colors.cardBorder, 1)
+
+        resetBtn.Activated:Connect(function()
             if Movement and Movement.Reset then Movement.Reset() end
         end)
 
-        local settings = pageBuilders.pages.Settings
-        local settingsLeft = section(settings, "DISPLAY", UDim2.new(0.5, -8, 0, 0))
-        settingsLeft.Position = UDim2.fromOffset(0, 0)
-        methodButton(settingsLeft, "Theme", {"Dark", "Midnight", "System"}, function() return runtime.uiTheme or "Dark" end, function(v) runtime.uiTheme = v end)
-        methodButton(settingsLeft, "Language", {"English", "Vietnamese"}, function() return runtime.uiLanguage or "English" end, function(v) runtime.uiLanguage = v end)
-        slider(settingsLeft, "UI Scale", function() return runtime.uiScale or 100 end, function(v) runtime.uiScale = v end, 75, 125, 5, "%")
-        toggle(settingsLeft, "FPS Display", "Placeholder performance display", function() return runtime.showFps == true end, function(v) runtime.showFps = v end)
-        toggle(settingsLeft, "Performance Mode", "Reduce UI refresh work", function() return runtime.performanceMode == true end, function(v) runtime.performanceMode = v end)
+        -- PAGE: SETTINGS (⚙)
+        local _, settingsScroll = createGenericPage("Settings", "Settings & Config", "PREFERENCES & KEYBINDS")
+        local setCard, setBody = createCard(settingsScroll, "DISPLAY & LOCALE", "⚙", false)
+        addDropdown(setBody, "Language", { "English", "Tiếng Việt" }, false, function()
+            return runtime.uiLanguage or "English"
+        end, function(v)
+            runtime.uiLanguage = v
+            langBtn.Text = "文A  " .. v
+        end)
 
-        local settingsRight = section(settings, "CONFIGURATION", UDim2.new(0.5, -8, 0, 0))
-        settingsRight.Position = UDim2.new(0.5, 8, 0, 0)
-        button(settingsRight, "Save Configuration", "Placeholder: local config storage", function() warn("[FIGGY] Save Configuration requires writefile support") end)
-        button(settingsRight, "Load Configuration", "Placeholder: local config storage", function() warn("[FIGGY] Load Configuration requires readfile support") end)
+        local keyRow, keySlot = createRow(setBody, "Hub Toggle Key")
+        local keyBtn = Instance.new("TextButton")
+        keyBtn.AnchorPoint = Vector2.new(1, 0.5)
+        keyBtn.Position = UDim2.new(1, 0, 0.5, 0)
+        keyBtn.Size = UDim2.fromOffset(60, 26)
+        keyBtn.BackgroundColor3 = colors.control
+        keyBtn.BorderSizePixel = 0
+        keyBtn.Text = (runtime.hubToggleKey or Enum.KeyCode.G).Name
+        keyBtn.Font = Enum.Font.GothamBold
+        keyBtn.TextSize = 11
+        keyBtn.TextColor3 = colors.text
+        keyBtn.AutoButtonColor = false
+        keyBtn.ZIndex = 6
+        keyBtn.Parent = keySlot
+        corner(keyBtn, 6)
+        stroke(keyBtn, colors.controlBorder, 1)
+
+        local listeningForKey = false
+        keyBtn.Activated:Connect(function()
+            if listeningForKey then return end
+            listeningForKey = true
+            keyBtn.Text = "..."
+            local conn
+            conn = UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    runtime.hubToggleKey = input.KeyCode
+                    keyBtn.Text = input.KeyCode.Name
+                    listeningForKey = false
+                    conn:Disconnect()
+                end
+            end)
+        end)
+
+        return window
     end
 
-    local function formatStatus()
-        if not Diagnostics then return "Diagnostics unavailable" end
+    -------------------------------------------------------------------------
+    -- STATUS REFRESH LOOP
+    -------------------------------------------------------------------------
+    local function formatLiveStatus()
+        if not Diagnostics then return "Caught Void Pearl x19" end
         local ok, diag = pcall(Diagnostics.Collect)
-        if not ok or type(diag) ~= "table" then return "Loading diagnostics..." end
-        local parts = {}
+        if not ok or type(diag) ~= "table" then return "Caught Void Pearl x19" end
+
         if diag.autoFarm then
-            table.insert(parts, string.format("Eggs %d/%d · %s", (diag.esp and diag.esp.eggsVisible or 0), (diag.esp and diag.esp.eggsTotal or 0), tostring(diag.autoFarm.phase or "Idle")))
-            if diag.autoFarm.target then
-                table.insert(parts, string.format("Target: %s (%dm)", tostring(diag.autoFarm.target.name or "Egg"), tonumber(diag.autoFarm.target.distance) or 0))
+            if diag.autoFarm.isCarrying and diag.autoFarm.target then
+                return string.format("Carrying: %s", tostring(diag.autoFarm.target.name or "Egg"))
+            elseif diag.autoFarm.target then
+                return string.format("Target: %s (%dm)", tostring(diag.autoFarm.target.name or "Egg"), math.floor(diag.autoFarm.target.distance or 0))
+            elseif diag.autoFarm.phase and diag.autoFarm.phase ~= "Idle" then
+                return string.format("Phase: %s", tostring(diag.autoFarm.phase))
             end
         end
-        if diag.inventory and diag.inventory.active then table.insert(parts, string.format("Inventory: %s", tostring(diag.inventory.detail or diag.inventory.phase))) end
-        return table.concat(parts, "\n")
+
+        local eggsCount = diag.esp and diag.esp.eggsVisible or 0
+        if eggsCount > 0 then
+            return string.format("Field Eggs: %d visible", eggsCount)
+        end
+
+        return "Caught Void Pearl x19"
     end
 
     local function startStatusLoop()
@@ -866,19 +1736,11 @@ function EggHub.create(deps)
         statusTask = task.spawn(function()
             while statusRunning do
                 runWithPluginIdentity(function()
-                    if gui and window then
-                        local statusCard = window:FindFirstChild("Status", true)
-                        if statusCard then
-                            for _, child in ipairs(statusCard:GetChildren()) do
-                                if child:IsA("TextLabel") then
-                                    child.Text = formatStatus()
-                                    break
-                                end
-                            end
-                        end
+                    if statusPillText and statusPillText.Parent then
+                        statusPillText.Text = formatLiveStatus()
                     end
                 end)
-                task.wait(runtime.hubStatusRefreshInterval or 1)
+                task.wait(runtime.hubStatusRefreshInterval or 1.5)
             end
         end)
     end
@@ -887,20 +1749,13 @@ function EggHub.create(deps)
         statusRunning = false
     end
 
-    local inputConnection
-    local attachKeybind
-
-    local function SetVisible(value)
-        runtime.hubVisible = value == true
+    local function SetVisible(val)
+        runtime.hubVisible = val == true
         visible = runtime.hubVisible
-
         if window then
-            local ok = pcall(function()
-                window.Visible = visible
-            end)
-
-            if not ok then
-                warn("[FIGGY] Cannot change window visibility")
+            pcall(function() window.Visible = visible end)
+            if not visible then
+                closeActiveDropdown()
             end
         end
     end
@@ -910,26 +1765,21 @@ function EggHub.create(deps)
         return visible
     end
 
+    local function attachKeybind()
+        if inputConnection then return end
+        inputConnection = UserInputService.InputBegan:Connect(function(input, processed)
+            if not processed and input.KeyCode == (runtime.hubToggleKey or Enum.KeyCode.G) then
+                ToggleVisible()
+            end
+        end)
+    end
+
     local function start()
-        local ok, err = runWithPluginIdentity(function()
+        runWithPluginIdentity(function()
             makeWindow()
             attachKeybind()
             SetVisible(runtime.hubVisible ~= false)
         end)
-
-        if not ok then
-            warn("[FIGGY] Start fallback: " .. tostring(err))
-
-            local fallbackOk = pcall(function()
-                makeWindow()
-            end)
-
-            if fallbackOk then
-                SetVisible(runtime.hubVisible ~= false)
-                attachKeybind()
-            end
-        end
-
         startStatusLoop()
     end
 
@@ -940,18 +1790,13 @@ function EggHub.create(deps)
 
     local function destroy()
         stopStatusLoop()
+        if inputConnection then
+            inputConnection:Disconnect()
+            inputConnection = nil
+        end
         if gui then gui:Destroy() end
         gui = nil
         window = nil
-    end
-
-    attachKeybind = function()
-        if inputConnection then return end
-        inputConnection = game:GetService("UserInputService").InputBegan:Connect(function(input, processed)
-            if not processed and input.KeyCode == (runtime.hubToggleKey or Enum.KeyCode.G) then
-                ToggleVisible()
-            end
-        end)
     end
 
     return {
