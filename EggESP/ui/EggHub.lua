@@ -33,7 +33,7 @@ function EggHub.create(deps)
     local inputConnection
     local activeDropdownMenu = nil
 
-    -- Runtime defaults for Venyx options if not already set
+    -- Runtime defaults for Venyx options
     if runtime.moveToEggMethod == nil then runtime.moveToEggMethod = "Teleport" end
     if runtime.deliveryMethod == nil then runtime.deliveryMethod = "Quick steps" end
     if runtime.autoFarmPriority == nil then runtime.autoFarmPriority = "Best value" end
@@ -42,20 +42,43 @@ function EggHub.create(deps)
     if runtime.autoHopDelay == nil then runtime.autoHopDelay = 30 end
     if runtime.autoHopMode == nil then runtime.autoHopMode = "Lowest Player Count" end
     if runtime.uiLanguage == nil then runtime.uiLanguage = "English" end
-    if runtime.whitelistEggNames == nil then
-        runtime.whitelistEggNames = { ArchAngel = true }
-    end
+
+    -- Defaults matching the screenshot badges
     if runtime.teleportZones == nil then
-        runtime.teleportZones = { ["Cherry Blossom"] = true }
+        runtime.teleportZones = {
+            ["Cherry Blossom"] = true,
+            ["Alien"] = true,
+            ["Volcano"] = true,
+            ["Titan Temple"] = true,
+            ["Light Dark"] = true,
+        }
+    end
+    if runtime.uiZoneSelection == nil then
+        runtime.uiZoneSelection = {
+            ["Alien"] = true,
+            ["Cherry Blossom"] = true,
+            ["Volcano"] = true,
+            ["Titan Temple"] = true,
+            ["Light Dark"] = true,
+        }
     end
     if runtime.uiMutationSelection == nil then
         runtime.uiMutationSelection = { None = true }
     end
     if runtime.uiRaritySelection == nil then
-        runtime.uiRaritySelection = { Divine = true }
+        runtime.uiRaritySelection = {
+            ["Divine"] = true,
+            ["Eternal"] = true,
+        }
     end
-    if runtime.uiZoneSelection == nil then
-        runtime.uiZoneSelection = { Alien = true }
+    if runtime.whitelistEggNames == nil then
+        runtime.whitelistEggNames = {
+            ["ArchAngel"] = true,
+            ["Void Pearl"] = true,
+            ["Golden Goose"] = true,
+            ["Dragon Egg"] = true,
+            ["Cosmic Egg"] = true,
+        }
     end
 
     -- Venyx Dark Theme Palette
@@ -133,6 +156,8 @@ function EggHub.create(deps)
         l.TextYAlignment = Enum.TextYAlignment.Center
         l.Position = position or UDim2.fromOffset(0, 0)
         l.Size = dimensions or UDim2.fromScale(1, 1)
+        local pZ = (parent and parent:IsA("GuiObject") and parent.ZIndex) or 1
+        l.ZIndex = pZ + 5
         l.Parent = parent
         return l
     end
@@ -167,6 +192,7 @@ function EggHub.create(deps)
         gui.ResetOnSpawn = false
         gui.IgnoreGuiInset = true
         gui.DisplayOrder = 100
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
         pcall(function() gui.Parent = game:GetService("CoreGui") end)
         if not gui.Parent then
             gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -298,7 +324,7 @@ function EggHub.create(deps)
         brandContainer.BackgroundTransparency = 1
         brandContainer.Position = UDim2.fromOffset(14, 0)
         brandContainer.Size = UDim2.new(0, 500, 1, 0)
-        brandContainer.ZIndex = 3
+        brandContainer.ZIndex = 10
         brandContainer.Parent = topBar
 
         local brandLayout = Instance.new("UIListLayout")
@@ -315,28 +341,32 @@ function EggHub.create(deps)
         logoBox.Size = UDim2.fromOffset(26, 26)
         logoBox.BackgroundColor3 = Color3.fromRGB(24, 26, 36)
         logoBox.BorderSizePixel = 0
-        logoBox.ZIndex = 4
+        logoBox.ZIndex = 11
         logoBox.Parent = brandContainer
         corner(logoBox, 6)
         stroke(logoBox, colors.panelBorder, 1)
 
         local logoText = text(logoBox, "Vx", 13, colors.text, Enum.Font.GothamBlack)
         logoText.TextXAlignment = Enum.TextXAlignment.Center
+        logoText.ZIndex = 12
 
         -- "VENYX" Title
         local venyxLabel = text(brandContainer, "VENYX", 14, colors.text, Enum.Font.GothamBold)
         venyxLabel.LayoutOrder = 2
         venyxLabel.Size = UDim2.fromOffset(56, 26)
+        venyxLabel.ZIndex = 11
 
         -- "/" Separator
         local sepLabel = text(brandContainer, "/", 13, colors.subtext, Enum.Font.GothamBold)
         sepLabel.LayoutOrder = 3
         sepLabel.Size = UDim2.fromOffset(8, 26)
+        sepLabel.ZIndex = 11
 
         -- "Steal An Egg" Subtitle
         local gameLabel = text(brandContainer, "Steal An Egg", 13, colors.muted, Enum.Font.GothamSemibold)
         gameLabel.LayoutOrder = 4
         gameLabel.Size = UDim2.fromOffset(84, 26)
+        gameLabel.ZIndex = 11
 
         -- "v1.7.2" Version Badge
         local verBadge = Instance.new("Frame")
@@ -344,13 +374,14 @@ function EggHub.create(deps)
         verBadge.Size = UDim2.fromOffset(46, 20)
         verBadge.BackgroundColor3 = Color3.fromRGB(24, 27, 36)
         verBadge.BorderSizePixel = 0
-        verBadge.ZIndex = 4
+        verBadge.ZIndex = 11
         verBadge.Parent = brandContainer
         corner(verBadge, 5)
         stroke(verBadge, colors.panelBorder, 1)
 
         local verLabel = text(verBadge, "v1.7.2", 10, colors.muted, Enum.Font.GothamMedium)
         verLabel.TextXAlignment = Enum.TextXAlignment.Center
+        verLabel.ZIndex = 12
 
         -- Live Status Pill: "● Caught Void Pearl x19"
         local statusPill = Instance.new("Frame")
@@ -358,7 +389,7 @@ function EggHub.create(deps)
         statusPill.Size = UDim2.fromOffset(170, 24)
         statusPill.BackgroundColor3 = Color3.fromRGB(20, 23, 31)
         statusPill.BorderSizePixel = 0
-        statusPill.ZIndex = 4
+        statusPill.ZIndex = 11
         statusPill.Parent = brandContainer
         corner(statusPill, 12)
         stroke(statusPill, colors.cardBorder, 1)
@@ -368,11 +399,12 @@ function EggHub.create(deps)
         dot.Position = UDim2.fromOffset(10, 8.5)
         dot.BackgroundColor3 = colors.green
         dot.BorderSizePixel = 0
-        dot.ZIndex = 5
+        dot.ZIndex = 12
         dot.Parent = statusPill
         corner(dot, 4)
 
         statusPillText = text(statusPill, "Caught Void Pearl x19", 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(23, 0), UDim2.new(1, -28, 1, 0))
+        statusPillText.ZIndex = 12
 
         -- Top Right Actions: Language, Search, Minimize, Close
         local topActions = Instance.new("Frame")
@@ -380,7 +412,7 @@ function EggHub.create(deps)
         topActions.AnchorPoint = Vector2.new(1, 0.5)
         topActions.Position = UDim2.new(1, -12, 0.5, 0)
         topActions.Size = UDim2.fromOffset(360, 32)
-        topActions.ZIndex = 3
+        topActions.ZIndex = 10
         topActions.Parent = topBar
 
         local topActionsLayout = Instance.new("UIListLayout")
@@ -402,7 +434,7 @@ function EggHub.create(deps)
         langBtn.TextSize = 11
         langBtn.TextColor3 = colors.text
         langBtn.AutoButtonColor = false
-        langBtn.ZIndex = 4
+        langBtn.ZIndex = 11
         langBtn.Parent = topActions
         corner(langBtn, 7)
         stroke(langBtn, colors.cardBorder, 1)
@@ -422,7 +454,7 @@ function EggHub.create(deps)
         searchContainer.Size = UDim2.fromOffset(130, 28)
         searchContainer.BackgroundColor3 = colors.panel
         searchContainer.BorderSizePixel = 0
-        searchContainer.ZIndex = 4
+        searchContainer.ZIndex = 11
         searchContainer.Parent = topActions
         corner(searchContainer, 7)
         stroke(searchContainer, colors.cardBorder, 1)
@@ -438,7 +470,7 @@ function EggHub.create(deps)
         searchBox.TextSize = 11
         searchBox.TextColor3 = colors.text
         searchBox.ClearTextOnFocus = false
-        searchBox.ZIndex = 5
+        searchBox.ZIndex = 12
         searchBox.Parent = searchContainer
 
         -- Search filtering logic across visible cards/rows
@@ -469,7 +501,7 @@ function EggHub.create(deps)
         minBtn.TextSize = 12
         minBtn.TextColor3 = colors.muted
         minBtn.AutoButtonColor = false
-        minBtn.ZIndex = 4
+        minBtn.ZIndex = 11
         minBtn.Parent = topActions
         corner(minBtn, 7)
         stroke(minBtn, colors.cardBorder, 1)
@@ -491,7 +523,7 @@ function EggHub.create(deps)
         closeBtn.TextSize = 15
         closeBtn.TextColor3 = colors.muted
         closeBtn.AutoButtonColor = false
-        closeBtn.ZIndex = 4
+        closeBtn.ZIndex = 11
         closeBtn.Parent = topActions
         corner(closeBtn, 7)
         stroke(closeBtn, colors.cardBorder, 1)
@@ -511,7 +543,7 @@ function EggHub.create(deps)
         sidebar.Size = UDim2.new(0, 60, 1, -52)
         sidebar.BackgroundColor3 = colors.sidebar
         sidebar.BorderSizePixel = 0
-        sidebar.ZIndex = 2
+        sidebar.ZIndex = 3
         sidebar.Parent = window
 
         local sidebarLine = Instance.new("Frame")
@@ -519,14 +551,14 @@ function EggHub.create(deps)
         sidebarLine.Size = UDim2.new(0, 1, 1, 0)
         sidebarLine.BackgroundColor3 = colors.panelBorder
         sidebarLine.BorderSizePixel = 0
-        sidebarLine.ZIndex = 3
+        sidebarLine.ZIndex = 4
         sidebarLine.Parent = sidebar
 
         local navList = Instance.new("Frame")
         navList.BackgroundTransparency = 1
         navList.Position = UDim2.fromOffset(7, 14)
         navList.Size = UDim2.new(1, -14, 1, -80)
-        navList.ZIndex = 3
+        navList.ZIndex = 4
         navList.Parent = sidebar
 
         local navLayout = Instance.new("UIListLayout")
@@ -538,10 +570,10 @@ function EggHub.create(deps)
 
         local tabsData = {
             { id = "Home", icon = "⌂", title = "Home" },
-            { id = "Steal", icon = "🥚", title = "Steal" },
-            { id = "Pet", icon = "🌱", title = "Pets" },
-            { id = "ESP", icon = "✨", title = "Visuals" },
-            { id = "Player", icon = "👤", title = "Player" },
+            { id = "Steal", icon = "◎", title = "Steal" },
+            { id = "Pet", icon = "✿", title = "Pets" },
+            { id = "ESP", icon = "✦", title = "Visuals" },
+            { id = "Player", icon = "♟", title = "Player" },
             { id = "Settings", icon = "⚙", title = "Settings" },
         }
 
@@ -575,7 +607,7 @@ function EggHub.create(deps)
             btn.BorderSizePixel = 0
             btn.Text = ""
             btn.AutoButtonColor = false
-            btn.ZIndex = 4
+            btn.ZIndex = 5
             btn.Parent = navList
             corner(btn, 12)
             local s = stroke(btn, Color3.fromRGB(58, 62, 84), 1)
@@ -583,6 +615,7 @@ function EggHub.create(deps)
 
             local iconLbl = text(btn, tabInfo.icon, 18, tabInfo.id == "Steal" and colors.text or colors.muted)
             iconLbl.TextXAlignment = Enum.TextXAlignment.Center
+            iconLbl.ZIndex = 10
 
             btn.Activated:Connect(function()
                 runWithPluginIdentity(function()
@@ -600,7 +633,7 @@ function EggHub.create(deps)
         avatarFrame.Size = UDim2.fromOffset(36, 36)
         avatarFrame.BackgroundColor3 = colors.card
         avatarFrame.BorderSizePixel = 0
-        avatarFrame.ZIndex = 4
+        avatarFrame.ZIndex = 5
         avatarFrame.Parent = sidebar
         corner(avatarFrame, 18)
         stroke(avatarFrame, colors.cardBorder, 1)
@@ -609,7 +642,7 @@ function EggHub.create(deps)
         avatarImg.Size = UDim2.fromScale(1, 1)
         avatarImg.BackgroundTransparency = 1
         avatarImg.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId)
-        avatarImg.ZIndex = 5
+        avatarImg.ZIndex = 6
         avatarImg.Parent = avatarFrame
         corner(avatarImg, 18)
 
@@ -658,9 +691,11 @@ function EggHub.create(deps)
             cardHeader.Parent = card
 
             local headerTitle = text(cardHeader, (iconSymbol and (iconSymbol .. "  ") or "") .. title, 12, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(1, -50, 1, 0))
+            headerTitle.ZIndex = 10
 
-            local chevron = text(cardHeader, defaultCollapsed and "›" or "⌄", 15, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -30, 0, 0), UDim2.fromOffset(20, 42))
+            local chevron = text(cardHeader, defaultCollapsed and ">" or "v", 12, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -30, 0, 0), UDim2.fromOffset(20, 42))
             chevron.TextXAlignment = Enum.TextXAlignment.Center
+            chevron.ZIndex = 10
 
             local body = Instance.new("Frame")
             body.Name = "CardBody"
@@ -687,7 +722,7 @@ function EggHub.create(deps)
             cardHeader.Activated:Connect(function()
                 closeActiveDropdown()
                 body.Visible = not body.Visible
-                chevron.Text = body.Visible and "⌄" or "›"
+                chevron.Text = body.Visible and "v" or ">"
             end)
 
             return card, body
@@ -708,13 +743,14 @@ function EggHub.create(deps)
 
             local title = text(row, labelText, 12, colors.text, Enum.Font.GothamSemibold, UDim2.fromOffset(0, 0), UDim2.new(0.48, 0, 1, 0))
             title.Name = "__ROW_TITLE"
+            title.ZIndex = 10
 
             local rightSlot = Instance.new("Frame")
             rightSlot.AnchorPoint = Vector2.new(1, 0.5)
             rightSlot.Position = UDim2.new(1, 0, 0.5, 0)
             rightSlot.Size = UDim2.new(0.52, 0, 1, 0)
             rightSlot.BackgroundTransparency = 1
-            rightSlot.ZIndex = 5
+            rightSlot.ZIndex = 6
             rightSlot.Parent = row
 
             return row, rightSlot
@@ -732,7 +768,7 @@ function EggHub.create(deps)
             switch.BorderSizePixel = 0
             switch.Text = ""
             switch.AutoButtonColor = false
-            switch.ZIndex = 6
+            switch.ZIndex = 7
             switch.Parent = rightSlot
             corner(switch, 11)
             stroke(switch, colors.cardBorder, 1)
@@ -742,7 +778,7 @@ function EggHub.create(deps)
             knob.Position = UDim2.fromOffset(3, 3)
             knob.BackgroundColor3 = colors.knob
             knob.BorderSizePixel = 0
-            knob.ZIndex = 7
+            knob.ZIndex = 8
             knob.Parent = switch
             corner(knob, 8)
 
@@ -771,7 +807,7 @@ function EggHub.create(deps)
             return row
         end
 
-        -- Dropdown Button with Badges ("Cherry Blossom +4 ⌄")
+        -- Dropdown Button with Badges ("Cherry Blossom +4 v")
         local function addDropdown(parent, labelText, options, isMultiSelect, getSelection, setSelection)
             local row, rightSlot = createRow(parent, labelText)
 
@@ -783,48 +819,34 @@ function EggHub.create(deps)
             btn.BorderSizePixel = 0
             btn.Text = ""
             btn.AutoButtonColor = false
-            btn.ZIndex = 6
+            btn.ZIndex = 7
             btn.Parent = rightSlot
             corner(btn, 7)
             stroke(btn, colors.controlBorder, 1)
 
-            local btnContent = Instance.new("Frame")
-            btnContent.Size = UDim2.new(1, -16, 1, 0)
-            btnContent.Position = UDim2.fromOffset(10, 0)
-            btnContent.BackgroundTransparency = 1
-            btnContent.ZIndex = 7
-            btnContent.Parent = btn
-
-            local btnLayout = Instance.new("UIListLayout")
-            btnLayout.FillDirection = Enum.FillDirection.Horizontal
-            btnLayout.VerticalAlignment = Enum.VerticalAlignment.Center
-            btnLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
-            btnLayout.Padding = UDim.new(0, 6)
-            btnLayout.SortOrder = Enum.SortOrder.LayoutOrder
-            btnLayout.Parent = btnContent
-
-            local valLabel = text(btnContent, "", 11, colors.text, Enum.Font.GothamMedium)
-            valLabel.LayoutOrder = 1
-            valLabel.Size = UDim2.fromOffset(80, 24)
+            local valLabel = text(btn, "None", 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(10, 0), UDim2.new(1, -48, 1, 0))
+            valLabel.ZIndex = 10
             valLabel.ClipsDescendants = true
 
             local badgePill = Instance.new("Frame")
-            badgePill.LayoutOrder = 2
-            badgePill.Size = UDim2.fromOffset(26, 17)
+            badgePill.AnchorPoint = Vector2.new(1, 0.5)
+            badgePill.Position = UDim2.new(1, -22, 0.5, 0)
+            badgePill.Size = UDim2.fromOffset(24, 18)
             badgePill.BackgroundColor3 = colors.badgeBg
             badgePill.BorderSizePixel = 0
             badgePill.Visible = false
-            badgePill.ZIndex = 8
-            badgePill.Parent = btnContent
+            badgePill.ZIndex = 10
+            badgePill.Parent = btn
             corner(badgePill, 5)
             stroke(badgePill, colors.badgeBorder, 1)
 
             local badgeText = text(badgePill, "+0", 9, colors.muted, Enum.Font.GothamBold)
             badgeText.TextXAlignment = Enum.TextXAlignment.Center
+            badgeText.ZIndex = 11
 
-            local chevron = text(btn, "⌄", 12, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -18, 0, 0), UDim2.fromOffset(14, 28))
+            local chevron = text(btn, "v", 10, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -18, 0, 0), UDim2.fromOffset(14, 28))
             chevron.TextXAlignment = Enum.TextXAlignment.Center
-            chevron.ZIndex = 7
+            chevron.ZIndex = 10
 
             local function refreshButtonDisplay()
                 if isMultiSelect then
@@ -838,17 +860,21 @@ function EggHub.create(deps)
                     end
                     if #selectedList == 0 then
                         valLabel.Text = "None"
+                        valLabel.Size = UDim2.new(1, -44, 1, 0)
                         badgePill.Visible = false
                     elseif #selectedList == 1 then
                         valLabel.Text = selectedList[1]
+                        valLabel.Size = UDim2.new(1, -44, 1, 0)
                         badgePill.Visible = false
                     else
                         valLabel.Text = selectedList[1]
+                        valLabel.Size = UDim2.new(1, -54, 1, 0)
                         badgePill.Visible = true
                         badgeText.Text = "+" .. tostring(#selectedList - 1)
                     end
                 else
                     valLabel.Text = tostring(getSelection() or options[1] or "None")
+                    valLabel.Size = UDim2.new(1, -44, 1, 0)
                     badgePill.Visible = false
                 end
             end
@@ -912,14 +938,14 @@ function EggHub.create(deps)
                     corner(item, 6)
 
                     local itemText = text(item, optLabel, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(26, 0), UDim2.new(1, -30, 1, 0))
-                    itemText.ZIndex = 63
+                    itemText.ZIndex = 65
 
                     local indicator = Instance.new("Frame")
                     indicator.Size = UDim2.fromOffset(12, 12)
                     indicator.Position = UDim2.fromOffset(8, 9)
                     indicator.BackgroundColor3 = colors.control
                     indicator.BorderSizePixel = 0
-                    indicator.ZIndex = 63
+                    indicator.ZIndex = 65
                     indicator.Parent = item
                     corner(indicator, isMultiSelect and 3 or 6)
 
@@ -984,7 +1010,7 @@ function EggHub.create(deps)
 
             local valueText = text(valueBadge, "0", 10, colors.text, Enum.Font.GothamBold)
             valueText.TextXAlignment = Enum.TextXAlignment.Center
-            valueText.ZIndex = 8
+            valueText.ZIndex = 10
 
             local trackWidth = 110
             local track = Instance.new("TextButton")
@@ -1092,8 +1118,10 @@ function EggHub.create(deps)
         stealHeader.Parent = stealPage
 
         local stealTitle = text(stealHeader, "Steal", 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(120, 26))
+        stealTitle.ZIndex = 10
 
         local autoStealSubLabel = text(stealHeader, "AUTO STEAL", 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(120, 16))
+        autoStealSubLabel.ZIndex = 10
 
         -- Sub-Tabs: "Auto Steal" & "Egg Predictor" on top right
         local subTabsBar = Instance.new("Frame")
@@ -1426,6 +1454,7 @@ function EggHub.create(deps)
 
         local predCard, predBody = createCard(stealSubPagePredictor, "EGG PREDICTOR", "🔮", false)
         local predStatusLabel = text(predBody, "Scanning field egg cycles and probability...", 12, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 30))
+        predStatusLabel.ZIndex = 10
 
         local predTableContainer = Instance.new("Frame")
         predTableContainer.Size = UDim2.new(1, 0, 0, 220)
@@ -1444,10 +1473,14 @@ function EggHub.create(deps)
         predHeaderRow.Parent = predTableContainer
         corner(predHeaderRow, 8)
 
-        text(predHeaderRow, "Zone", 11, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
-        text(predHeaderRow, "Next Egg", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
-        text(predHeaderRow, "Rarity / Value", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
-        text(predHeaderRow, "Timer", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+        local th1 = text(predHeaderRow, "Zone", 11, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
+        th1.ZIndex = 10
+        local th2 = text(predHeaderRow, "Next Egg", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
+        th2.ZIndex = 10
+        local th3 = text(predHeaderRow, "Rarity / Value", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
+        th3.ZIndex = 10
+        local th4 = text(predHeaderRow, "Timer", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+        th4.ZIndex = 10
 
         local predList = Instance.new("ScrollingFrame")
         predList.Position = UDim2.fromOffset(0, 34)
@@ -1477,10 +1510,14 @@ function EggHub.create(deps)
             row.ZIndex = 7
             row.Parent = predList
 
-            text(row, item.zone, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
-            text(row, item.egg, 11, colors.accentGlow, Enum.Font.GothamSemibold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
-            text(row, item.rarity, 11, colors.muted, Enum.Font.GothamMedium, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
-            text(row, item.timer, 11, colors.green, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+            local c1 = text(row, item.zone, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
+            c1.ZIndex = 10
+            local c2 = text(row, item.egg, 11, colors.accentGlow, Enum.Font.GothamSemibold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
+            c2.ZIndex = 10
+            local c3 = text(row, item.rarity, 11, colors.muted, Enum.Font.GothamMedium, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
+            c3.ZIndex = 10
+            local c4 = text(row, item.timer, 11, colors.green, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+            c4.ZIndex = 10
         end
 
         -- Sub-tab switching between Auto Steal & Egg Predictor
@@ -1539,8 +1576,10 @@ function EggHub.create(deps)
             pHeader.ZIndex = 4
             pHeader.Parent = page
 
-            text(pHeader, pageTitleText, 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(200, 26))
-            text(pHeader, subtitleText or pageTitleText:upper(), 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(200, 16))
+            local pTitle = text(pHeader, pageTitleText, 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(200, 26))
+            pTitle.ZIndex = 10
+            local pSub = text(pHeader, subtitleText or pageTitleText:upper(), 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(200, 16))
+            pSub.ZIndex = 10
 
             local pScroll = Instance.new("ScrollingFrame")
             pScroll.Position = UDim2.fromOffset(20, 64)
@@ -1577,8 +1616,9 @@ function EggHub.create(deps)
         local homeCard2, homeBody2 = createCard(homeScroll, "SESSION TELEMETRY", "📊", false)
         local telemetryText = text(homeBody2, "Loading telemetry stats...", 11, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 48))
         telemetryText.TextWrapped = true
+        telemetryText.ZIndex = 10
 
-        -- PAGE: PET (🌱)
+        -- PAGE: PET (✿)
         local _, petScroll = createGenericPage("Pet", "Pet Automation", "PETS & BASE PEN")
         local petCard, petBody = createCard(petScroll, "PET CARE", "🌱", false)
         addToggle(petBody, "Auto Pet Care", function() return runtime.autoPetCareEnabled ~= false end, function(v) runtime.autoPetCareEnabled = v end)
@@ -1590,7 +1630,7 @@ function EggHub.create(deps)
         addToggle(penBody, "Auto Upgrade Base Pen", function() return runtime.autoUpgradeBasePen ~= false end, function(v) runtime.autoUpgradeBasePen = v end)
         addToggle(penBody, "Auto Collect Pen Money", function() return runtime.autoCollectPenMoney ~= false end, function(v) runtime.autoCollectPenMoney = v end)
 
-        -- PAGE: ESP (✨)
+        -- PAGE: ESP (✦)
         local _, espScroll = createGenericPage("ESP", "Visuals & ESP", "FIELD DISPLAY SETTINGS")
         local espCard, espBody = createCard(espScroll, "ESP TOGGLES", "✨", false)
         addToggle(espBody, "Egg ESP", function() return runtime.showEggs ~= false end, function(v) runtime.showEggs = v end)
@@ -1602,7 +1642,7 @@ function EggHub.create(deps)
         end)
         addSlider(espBody, "Max ESP Distance", function() return runtime.maxDistance or 200 end, function(v) runtime.maxDistance = v end, 50, 800, 25, false)
 
-        -- PAGE: PLAYER (👤)
+        -- PAGE: PLAYER (♟)
         local _, playerScroll = createGenericPage("Player", "Player Character", "MOVEMENT & STANDBY")
         local playerCard, playerBody = createCard(playerScroll, "STANDBY POSITION", "📍", false)
 
@@ -1618,7 +1658,7 @@ function EggHub.create(deps)
         standbyBtn.TextSize = 11
         standbyBtn.TextColor3 = colors.text
         standbyBtn.AutoButtonColor = false
-        standbyBtn.ZIndex = 6
+        standbyBtn.ZIndex = 8
         standbyBtn.Parent = standbySlot
         corner(standbyBtn, 6)
 
@@ -1649,7 +1689,7 @@ function EggHub.create(deps)
         resetBtn.TextSize = 10
         resetBtn.TextColor3 = colors.muted
         resetBtn.AutoButtonColor = false
-        resetBtn.ZIndex = 6
+        resetBtn.ZIndex = 8
         resetBtn.Parent = resetSlot
         corner(resetBtn, 6)
         stroke(resetBtn, colors.cardBorder, 1)
@@ -1680,7 +1720,7 @@ function EggHub.create(deps)
         keyBtn.TextSize = 11
         keyBtn.TextColor3 = colors.text
         keyBtn.AutoButtonColor = false
-        keyBtn.ZIndex = 6
+        keyBtn.ZIndex = 8
         keyBtn.Parent = keySlot
         corner(keyBtn, 6)
         stroke(keyBtn, colors.controlBorder, 1)
