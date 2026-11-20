@@ -1,1375 +1,2179 @@
 --[[
-    Auto farm: standby -> rarest egg -> pickup -> return standby -> repeat.
+    VENYX Steal An Egg UI Hub
+    Modern, high-fidelity Roblox GUI matching Venyx v1.7.2 style.
+    No VoidUI dependency required.
 ]]
 
-local AutoFarm = {}
+local EggHub = {}
 
-local CARRY_RADIUS = 8
-local PICKUP_MOVE_RADIUS = 12
-
-local PHASE = {
-    Standby = "Standby",
-    GoToEgg = "GoToEgg",
-    Pickup = "Pickup",
-    ReturnStandby = "ReturnStandby",
-    WaitDeposit = "WaitDeposit",
-    ManageInventory = "ManageInventory",
-    FeedParasite = "FeedParasite",
-    WaitForDay = "WaitForDay",
-    Idle = "Idle",
-}
-
-function AutoFarm.create(deps)
+function EggHub.create(deps)
     local Config = deps.Config
-    local EggData = deps.EggData
+    local AutoFarm = deps.AutoFarm
+    local SpeedBypass = deps.SpeedBypass
+    local Diagnostics = deps.Diagnostics
     local PathService = deps.PathService
-    local Movement = deps.Movement
+    local FarmFilters = deps.FarmFilters
+    local EggData = deps.EggData
     local EggState = deps.EggState
     local AreaEggSlotIdentity = deps.AreaEggSlotIdentity
-    local Passthrough = deps.Passthrough
-    local SpeedBypass = deps.SpeedBypass
+    if not EggState or not AreaEggSlotIdentity then
+        local ReplicatedStorage = game:GetService("ReplicatedStorage")
+        pcall(function()
+            EggState = EggState or require(ReplicatedStorage.Client.EggState)
+            AreaEggSlotIdentity = AreaEggSlotIdentity or require(ReplicatedStorage.Shared.Util.AreaEggSlotIdentity)
+        end)
+    end
+    local BasePenAutomation = deps.BasePenAutomation
     local InventoryManager = deps.InventoryManager
-    local DayCycle = deps.DayCycle
     local PetAutomation = deps.PetAutomation
-    local LocalPlayer = deps.LocalPlayer
+    local LocalPlayer = deps.LocalPlayer or game:GetService("Players").LocalPlayer
+    local Movement = deps.Movement
+    local UserInputService = deps.UserInputService or game:GetService("UserInputService")
+    local RunService = deps.RunService or game:GetService("RunService")
+    local TweenService = game:GetService("TweenService")
 
     local runtime = Config.Runtime
+    local callbacks = {}
+    local gui
+    local window
+    local visible = runtime.hubVisible ~= false
+    local statusTask
+    local statusRunning = false
+    local inputConnection
+    local activeDropdownMenu = nil
 
-    local state = {
-        enabled = false,
-        phase = PHASE.Idle,
-        targetEgg = nil,
-        waypoints = nil,
-        waypointIndex = 1,
-        pathGoal = nil,
-        carryUid = nil,
-        isCarrying = false,
-        lastPathCalc = 0,
-        stuckTimer = 0,
-        lastPosition = nil,
-        connection = nil,
-        characterConnection = nil,
-        detail = nil,
-        lastTargetRefresh = 0,
-        pickupFailCount = 0,
-        pickupSettleTicks = 0,
-        requireStandbyOnStart = false,
-        phaseEnteredAt = 0,
-        lastProgressAt = 0,
-        lastProgressPos = nil,
-        standbyStartAt = 0,
-        depositWaitSince = nil,
-        carryConfirmedAt = nil,
-        farmStartedAt = 0,
-        wasDayBlocked = false,
-        rushFarmAfterDay = false,
-        movementTrustRetryAt = 0,
-        lastPickupAttemptAt = 0,
-        -- FIX: track trust retry attempts to avoid infinite loop
-        trustRetryCount = 0,
-        -- FIX: blacklist eggs that cannot be picked up (trust loop)
-        blacklistedEggUids = {},
+    -- Runtime defaults for Venyx options
+    if runtime.moveToEggMethod == nil then runtime.moveToEggMethod = "Teleport" end
+    if runtime.deliveryMethod == nil then runtime.deliveryMethod = "Quick steps" end
+    if runtime.autoFarmPriority == nil then runtime.autoFarmPriority = "Best value" end
+    if runtime.autoFarmMinValuePerSec == nil then runtime.autoFarmMinValuePerSec = 441000000 end -- 441M/s
+    if runtime.autoFarmMaxValuePerSec == nil then runtime.autoFarmMaxValuePerSec = 14000000000 end -- 14B/s
+    if runtime.autoHopDelay == nil then runtime.autoHopDelay = 30 end
+    if runtime.autoHopMode == nil then runtime.autoHopMode = "Lowest Player Count" end
+    if runtime.uiLanguage == nil then runtime.uiLanguage = "English" end
+
+    -- Defaults matching the screenshot badges
+    if runtime.teleportZones == nil then
+        runtime.teleportZones = {
+            ["Cherry Blossom"] = true,
+            ["Alien"] = true,
+            ["Volcano"] = true,
+            ["Titan Temple"] = true,
+            ["Light Dark"] = true,
+        }
+    end
+    if runtime.uiZoneSelection == nil then
+        runtime.uiZoneSelection = {
+            ["Alien"] = true,
+            ["Cherry Blossom"] = true,
+            ["Volcano"] = true,
+            ["Titan Temple"] = true,
+            ["Light Dark"] = true,
+        }
+    end
+    if runtime.uiMutationSelection == nil then
+        runtime.uiMutationSelection = { None = true }
+    end
+    if runtime.uiRaritySelection == nil then
+        runtime.uiRaritySelection = {
+            ["Divine"] = true,
+            ["Eternal"] = true,
+        }
+    end
+    if runtime.whitelistEggNames == nil then
+        runtime.whitelistEggNames = {
+            ["ArchAngel"] = true,
+            ["Void Pearl"] = true,
+            ["Golden Goose"] = true,
+            ["Dragon Egg"] = true,
+            ["Cosmic Egg"] = true,
+        }
+    end
+
+    -- Venyx Dark Theme Palette
+    local colors = {
+        bg = Color3.fromRGB(14, 15, 19),
+        sidebar = Color3.fromRGB(11, 12, 16),
+        panel = Color3.fromRGB(20, 22, 28),
+        panelBorder = Color3.fromRGB(34, 37, 48),
+        card = Color3.fromRGB(24, 26, 34),
+        cardBorder = Color3.fromRGB(38, 42, 54),
+        control = Color3.fromRGB(30, 33, 44),
+        controlBorder = Color3.fromRGB(46, 51, 68),
+        controlHover = Color3.fromRGB(38, 42, 56),
+        badgeBg = Color3.fromRGB(36, 40, 54),
+        badgeBorder = Color3.fromRGB(50, 55, 74),
+        text = Color3.fromRGB(242, 244, 250),
+        muted = Color3.fromRGB(132, 137, 156),
+        subtext = Color3.fromRGB(90, 95, 115),
+        accent = Color3.fromRGB(99, 102, 241),      -- Sleek Indigo/Purple
+        accentGlow = Color3.fromRGB(129, 140, 248),
+        toggleActive = Color3.fromRGB(79, 70, 229),
+        toggleInactive = Color3.fromRGB(34, 37, 50),
+        knob = Color3.fromRGB(255, 255, 255),
+        green = Color3.fromRGB(46, 204, 113),
+        star = Color3.fromRGB(245, 158, 11),
+        red = Color3.fromRGB(239, 68, 68),
     }
 
-    local function compareEggPriority(a, b)
-        if not a then
-            return false
+    local function runWithPluginIdentity(fn)
+        if type(fn) ~= "function" then return false end
+        local previous
+        if type(getthreadidentity) == "function" then
+            local ok, id = pcall(getthreadidentity)
+            if ok then previous = id end
         end
-
-        if not b then
-            return true
+        if type(setthreadidentity) == "function" then
+            pcall(setthreadidentity, 8)
         end
-
-        if a.rarityTier ~= b.rarityTier then
-            return a.rarityTier > b.rarityTier
+        local ok, result = pcall(fn)
+        if type(setthreadidentity) == "function" and previous ~= nil then
+            pcall(setthreadidentity, previous)
         end
-
-        if runtime.autoFarmInfestedFirst ~= false then
-            local aInfested = a.hasParasite == true
-            local bInfested = b.hasParasite == true
-
-            if aInfested ~= bInfested then
-                return aInfested
-            end
+        if not ok then
+            warn("[VENYX] UI callback error: " .. tostring(result))
+            return false, result
         end
-
-        if a.dropWeight ~= b.dropWeight then
-            return a.dropWeight < b.dropWeight
-        end
-
-        return a.distance < b.distance
+        return true, result
     end
 
-    local function formatTargetDetail(egg)
-        local zoneLabel = egg.areaName or egg.info.areaName or "?"
-        return string.format("[%s] %s (%s)", zoneLabel, egg.info.name, egg.info.rarityName)
+    local function corner(parent, radius)
+        local c = Instance.new("UICorner")
+        c.CornerRadius = UDim.new(0, radius or 8)
+        c.Parent = parent
+        return c
     end
 
-    local function isAtStandbyStart(rootPos, standbyPos)
-        local radius = runtime.standbyStartRadius or runtime.standbyArriveRadius or 6
-        return Movement.IsNear(rootPos, standbyPos, radius)
+    local function stroke(parent, color, thickness, transparency)
+        local s = Instance.new("UIStroke")
+        s.Color = color or colors.panelBorder
+        s.Thickness = thickness or 1
+        s.Transparency = transparency or 0
+        s.ApplyStrokeMode = Enum.ApplyStrokeMode.Border
+        s.Parent = parent
+        return s
     end
 
-    local function isAtStandby(rootPos, standbyPos)
-        return Movement.IsNear(rootPos, standbyPos, runtime.standbyArriveRadius)
+    local function text(parent, textValue, size, color, font, position, dimensions)
+        local l = Instance.new("TextLabel")
+        l.BackgroundTransparency = 1
+        l.Font = font or Enum.Font.GothamSemibold
+        l.Text = textValue or ""
+        l.TextSize = size or 12
+        l.TextColor3 = color or colors.text
+        l.TextXAlignment = Enum.TextXAlignment.Left
+        l.TextYAlignment = Enum.TextYAlignment.Center
+        l.Position = position or UDim2.fromOffset(0, 0)
+        l.Size = dimensions or UDim2.fromScale(1, 1)
+        local pZ = (parent and parent:IsA("GuiObject") and parent.ZIndex) or 1
+        l.ZIndex = pZ + 5
+        l.Parent = parent
+        return l
     end
 
-    local function clearTargetPath()
-        state.waypoints = nil
-        state.pathGoal = nil
-        state.waypointIndex = 1
-    end
-
-    local function setTargetEgg(egg, updatePhaseDetail)
-        local changed = not state.targetEgg or not egg or state.targetEgg.uid ~= egg.uid
-
-        state.targetEgg = egg
-
-        if changed then
-            state.pickupFailCount = 0
-            -- FIX: reset trust retry count when switching eggs
-            state.trustRetryCount = 0
-            clearTargetPath()
-        end
-
-        if egg and updatePhaseDetail then
-            state.detail = formatTargetDetail(egg)
-        end
-    end
-
-    local function setPhase(phase, detail)
-        local phaseChanged = state.phase ~= phase
-        local oldPhase = state.phase
-
-        if phaseChanged or state.detail ~= detail then
-            state.phase = phase
-            state.detail = detail
-
-            if phaseChanged then
-                state.phaseEnteredAt = os.clock()
-
-                local movementPhases = {
-                    [PHASE.GoToEgg] = true,
-                    [PHASE.Pickup] = true,
-                    [PHASE.ReturnStandby] = true,
-                }
-                local sameMovement = movementPhases[oldPhase] and movementPhases[phase]
-
-                if not sameMovement then
-                    state.waypointIndex = 1
-                    state.stuckTimer = 0
-                    state.lastPosition = nil
-                    Movement.CancelMovement()
-                else
-                    state.stuckTimer = 0
-                end
-
-                if phase == PHASE.WaitDeposit then
-                    state.depositWaitSince = os.clock()
-                elseif phase ~= PHASE.ReturnStandby or not state.isCarrying then
-                    state.depositWaitSince = nil
-                end
-            end
-
-            print(string.format("[EggESP Auto] %s%s", phase, detail and (" - " .. detail) or ""))
-        end
-    end
-
-    local function setServerActionMode(enabled)
-        if SpeedBypass and SpeedBypass.SetServerActionMode then
-            SpeedBypass.SetServerActionMode(enabled)
-        elseif Movement.SetServerActionMode then
-            Movement.SetServerActionMode(enabled)
-        end
-    end
-
-    local function noteProgress(rootPos)
-        local now = os.clock()
-        local minDist = runtime.autoFarmProgressMinDist or 3
-
-        if state.lastProgressPos then
-            if Movement.HorizontalDistance(rootPos, state.lastProgressPos) >= minDist then
-                state.lastProgressAt = now
-                state.lastProgressPos = rootPos
-            end
+    -- Format numbers to M/s, B/s, k/s for sliders
+    local function formatPerSec(num)
+        if type(num) ~= "number" then return "0/s" end
+        if num >= 1e12 then
+            return string.format("%.1fT/s", num / 1e12):gsub("%.0T/s", "T/s")
+        elseif num >= 1e9 then
+            return string.format("%.0fB/s", num / 1e9)
+        elseif num >= 1e6 then
+            return string.format("%.0fM/s", num / 1e6)
+        elseif num >= 1e3 then
+            return string.format("%.0fk/s", num / 1e3)
         else
-            state.lastProgressAt = now
-            state.lastProgressPos = rootPos
+            return string.format("%d/s", math.floor(num))
         end
     end
 
-    local function recoverFromStuck(reason)
-        print(string.format("[EggESP Auto] Recovery: %s", reason))
-        Movement.CancelMovement()
-        if Movement.EnsureLocomotion then
-            Movement.EnsureLocomotion()
+    local function closeActiveDropdown()
+        if activeDropdownMenu and activeDropdownMenu.Parent then
+            activeDropdownMenu:Destroy()
+            activeDropdownMenu = nil
         end
-        setServerActionMode(false)
-        clearTargetPath()
-        state.pickupSettleTicks = 0
-        state.pickupFailCount = 0
-        state.lastProgressAt = os.clock()
-        state.lastProgressPos = Movement.GetRootPart() and Movement.GetRootPart().Position or nil
-
-        if state.isCarrying then
-            local rootPart = Movement.GetRootPart()
-            local standbyPos = runtime.standbyPosition
-
-            if rootPart and isAtStandby(rootPart.Position, standbyPos) then
-                state.depositWaitSince = os.clock()
-                setPhase(PHASE.WaitDeposit, "recovery deposit")
-            else
-                setPhase(PHASE.ReturnStandby, reason)
-            end
-
-            return
-        end
-
-        if state.phase == PHASE.Pickup or state.phase == PHASE.GoToEgg then
-            state.targetEgg = nil
-        end
-
-        setPhase(PHASE.Standby, reason)
     end
 
-    local function checkWatchdog(rootPart)
-        if not rootPart then
-            return
+    local function ensureGui()
+        if gui and gui.Parent then return gui end
+        gui = Instance.new("ScreenGui")
+        gui.Name = "VENYXHub"
+        gui.ResetOnSpawn = false
+        gui.IgnoreGuiInset = true
+        gui.DisplayOrder = 100
+        gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+        pcall(function() gui.Parent = game:GetService("CoreGui") end)
+        if not gui.Parent then
+            gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
         end
+        return gui
+    end
 
-        local now = os.clock()
-        local phaseAge = now - (state.phaseEnteredAt or now)
-        local progressAge = now - (state.lastProgressAt or now)
+    local pageFrames = {}
+    local navButtons = {}
+    local currentTabId = "Steal"
+    local currentStealSubTab = "AutoSteal"
+    local statusPillText
+    local stealSubTabAutoStealBtn
+    local stealSubTabPredictorBtn
+    local stealSubTabManualBtn
+    local stealSubPageAutoSteal
+    local stealSubPagePredictor
+    local stealSubPageManual
 
-        if state.requireStandbyOnStart then
-            local standbyTimeout = runtime.autoFarmStandbyStartTimeout or 30
+    local function makeWindow()
+        if window and window.Parent then return window end
+        ensureGui()
 
-            if now - (state.standbyStartAt or now) >= standbyTimeout then
-                state.requireStandbyOnStart = false
-                clearTargetPath()
-                print("[EggESP Auto] Recovery: standby start timeout")
-            end
-        end
+        -- Dismiss open dropdown if clicking anywhere in window
+        local overlayDismiss = Instance.new("TextButton")
+        overlayDismiss.Name = "OverlayDismiss"
+        overlayDismiss.BackgroundTransparency = 1
+        overlayDismiss.Size = UDim2.fromScale(1, 1)
+        overlayDismiss.Text = ""
+        overlayDismiss.ZIndex = 40
+        overlayDismiss.Visible = false
+        overlayDismiss.Parent = gui
+        overlayDismiss.Activated:Connect(function()
+            closeActiveDropdown()
+            overlayDismiss.Visible = false
+        end)
 
-        if state.isCarrying and state.depositWaitSince then
-            local depositTimeout = runtime.autoFarmDepositTimeout or 45
+        -- Main Window Frame
+        window = Instance.new("Frame")
+        window.Name = "MainWindow"
+        window.AnchorPoint = Vector2.new(0.5, 0.5)
+        window.Position = UDim2.new(0.5, 0, 0.5, 0)
+        window.Size = UDim2.fromOffset(920, 580)
+        window.BackgroundColor3 = colors.bg
+        window.BorderSizePixel = 0
+        window.Visible = visible
+        window.ClipsDescendants = false
+        window.ZIndex = 1
+        window.Parent = gui
+        corner(window, 12)
+        stroke(window, colors.panelBorder, 1)
 
-            if now - state.depositWaitSince >= depositTimeout then
-                state.isCarrying = false
-                state.carryUid = nil
-                state.depositWaitSince = nil
-                recoverFromStuck("deposit timeout")
-                return
-            end
-        end
+        -- Soft Drop Shadow
+        local shadow = Instance.new("ImageLabel")
+        shadow.Name = "Shadow"
+        shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+        shadow.Position = UDim2.fromScale(0.5, 0.5)
+        shadow.Size = UDim2.new(1, 36, 1, 36)
+        shadow.BackgroundTransparency = 1
+        shadow.Image = "rbxassetid://6015897843"
+        shadow.ImageColor3 = Color3.fromRGB(0, 0, 0)
+        shadow.ImageTransparency = 0.45
+        shadow.ScaleType = Enum.ScaleType.Slice
+        shadow.SliceCenter = Rect.new(10, 10, 118, 118)
+        shadow.ZIndex = 0
+        shadow.Parent = window
 
-        if state.phase == PHASE.Pickup then
-            local pickupTimeout = runtime.autoFarmPickupTimeout or 60
+        -- Window Dragging Logic
+        do
+            local dragging = false
+            local dragStart
+            local startPos
 
-            if phaseAge >= pickupTimeout then
-                state.targetEgg = nil
-                recoverFromStuck("pickup timeout")
-                return
-            end
-        end
-
-        if state.phase == PHASE.ManageInventory or state.phase == PHASE.FeedParasite then
-            local phaseTimeout = runtime.autoFarmPhaseTimeout or 90
-
-            if phaseAge >= phaseTimeout then
-                if InventoryManager then
-                    InventoryManager.Stop()
+            window.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 and input.Position.Y - window.AbsolutePosition.Y <= 52 then
+                    dragging = true
+                    dragStart = input.Position
+                    startPos = window.Position
+                    input.Changed:Connect(function()
+                        if input.UserInputState == Enum.UserInputState.End then
+                            dragging = false
+                        end
+                    end)
                 end
-
-                recoverFromStuck("inventory timeout")
-                return
-            end
-        end
-
-        local idlePhases = {
-            [PHASE.GoToEgg] = true,
-            [PHASE.Pickup] = true,
-            [PHASE.ReturnStandby] = true,
-            [PHASE.WaitDeposit] = true,
-        }
-
-        local stuckTimeout = runtime.autoFarmStuckTimeout or 22
-
-        if idlePhases[state.phase] then
-            if progressAge >= stuckTimeout then
-                recoverFromStuck("stuck timeout")
-            end
-        end
-
-        if state.phase == PHASE.Standby then
-            local stallTimeout = runtime.autoFarmStandbyStallTimeout or 10
-            local detail = state.detail or ""
-            local waiting = detail == "no eggs"
-                or detail == "waiting for spawn"
-                or detail:find("waiting", 1, true) ~= nil
-
-            if waiting and progressAge >= stallTimeout then
-                state.lastProgressAt = os.clock()
-                state.lastTargetRefresh = 0
-                clearTargetPath()
-
-                if EggData.InvalidateCache then
-                    EggData.InvalidateCache()
-                end
-
-                PathService.Invalidate()
-
-                if Movement.EnsureLocomotion then
-                    Movement.EnsureLocomotion()
-                end
-
-                print("[EggESP Auto] Recovery: standby stall refresh")
-            end
-        end
-    end
-
-    local function getStatus()
-        local inventoryStatus = InventoryManager and InventoryManager.GetStatus() or nil
-        local dayStatus = DayCycle and DayCycle.GetStatus() or nil
-
-        return {
-            enabled = state.enabled,
-            phase = state.phase,
-            detail = state.detail,
-            targetEgg = state.targetEgg,
-            isCarrying = state.isCarrying,
-            carryUid = state.carryUid,
-            standby = runtime.standbyPosition,
-            inventory = inventoryStatus,
-            dayCycle = dayStatus,
-            petAutomation = PetAutomation and PetAutomation.GetStatus() or nil,
-            pickupFailCount = state.pickupFailCount or 0,
-        }
-    end
-
-    local function shouldWaitForDay()
-        if not runtime.waitForDayBeforeFarm or not DayCycle then
-            return false
-        end
-
-        return DayCycle.IsEggAreaBlocked()
-    end
-
-    local function waitForDayDetail()
-        if not DayCycle then
-            return "waiting for day"
-        end
-
-        local seconds = DayCycle.SecondsUntilDay()
-
-        if seconds > 0 then
-            return string.format("%ds until day", seconds)
-        end
-
-        local _, reason = DayCycle.IsEggAreaBlocked()
-
-        return reason or "waiting for day"
-    end
-
-    local function handleNightWait(rootPart, standbyPos, atStandby)
-        if state.phase == PHASE.GoToEgg or state.phase == PHASE.Pickup then
-            state.targetEgg = nil
-            setPhase(PHASE.ReturnStandby, "night reset")
-            return true
-        end
-
-        setPhase(PHASE.WaitForDay, waitForDayDetail())
-
-        if not atStandby then
-            followPath(standbyPos, runtime.standbyArriveRadius)
-        else
-            Movement.CancelMovement()
-        end
-
-        return true
-    end
-
-    local function triggerRushFarmAfterDay()
-        state.rushFarmAfterDay = true
-        state.lastTargetRefresh = 0
-        state.lastPathCalc = 0
-        state.targetEgg = nil
-        clearTargetPath()
-
-        if EggData.InvalidateCache then
-            EggData.InvalidateCache()
-        end
-
-        PathService.Invalidate()
-        Movement.CancelMovement()
-    end
-
-    local function resolveSlotKey(record)
-        if record and AreaEggSlotIdentity.LooksLikeFirstAreaUid(record.Uid) then
-            return AreaEggSlotIdentity.SlotKey(record.AreaId, record.NestId)
-        end
-
-        return nil
-    end
-
-    local function findRarestEgg(force)
-        if EggData.InvalidateCache and force then
-            EggData.InvalidateCache()
-        end
-
-        -- FIX: expire old blacklist entries
-        local now = os.clock()
-        for uid, expiry in pairs(state.blacklistedEggUids) do
-            if now >= expiry then
-                state.blacklistedEggUids[uid] = nil
-            end
-        end
-
-        if EggData.FindBestForFarm then
-            -- Try to find an egg not in the blacklist
-            local bestEgg = EggData.FindBestForFarm(nil, force)
-            if bestEgg and not state.blacklistedEggUids[bestEgg.uid] then
-                return bestEgg
-            end
-            -- If best is blacklisted, fall through to CollectAll search below
-        end
-
-        local eggs = EggData.CollectAll(force)
-        for _, egg in ipairs(eggs) do
-            if not state.blacklistedEggUids[egg.uid] then
-                return egg
-            end
-        end
-        return nil
-    end
-
-    local function refreshTargetEgg(force)
-        local now = os.clock()
-        local interval = state.rushFarmAfterDay and 0
-            or (runtime.autoFarmTargetRefreshInterval or 0.75)
-
-        if not force and interval > 0 and now - state.lastTargetRefresh < interval then
-            return state.targetEgg
-        end
-
-        state.lastTargetRefresh = now
-
-        local bestEgg = findRarestEgg(false)
-        local current = state.targetEgg
-
-        if not current then
-            setTargetEgg(bestEgg, false)
-            return bestEgg
-        end
-
-        local refreshed = EggData.FindByUid and EggData.FindByUid(current.uid, false) or nil
-
-        if not refreshed then
-            setTargetEgg(bestEgg, state.phase == PHASE.GoToEgg or state.phase == PHASE.Pickup)
-            return state.targetEgg
-        end
-
-        if bestEgg and bestEgg.uid ~= refreshed.uid then
-            if (bestEgg.rarityTier or 0) > (refreshed.rarityTier or 0) then
-                setTargetEgg(bestEgg, true)
-                return state.targetEgg
-            end
-
-            if (bestEgg.rarityTier or 0) == (refreshed.rarityTier or 0)
-                and compareEggPriority(bestEgg, refreshed) then
-                setTargetEgg(bestEgg, true)
-                return state.targetEgg
-            end
-        end
-
-        if refreshed.worldPos ~= current.worldPos then
-            refreshed = EggData.FindByUid(current.uid, true) or refreshed
-        end
-
-        state.targetEgg = refreshed
-        return refreshed
-    end
-
-    local function syncWaypointIndex(rootPos, waypoints)
-        if not waypoints or #waypoints == 0 then
-            state.waypointIndex = 1
-            return
-        end
-
-        local bestIndex = state.waypointIndex
-        local bestDistance = math.huge
-
-        for index = state.waypointIndex, #waypoints do
-            local distance = Movement.HorizontalDistance(rootPos, waypoints[index])
-
-            if distance < bestDistance then
-                bestDistance = distance
-                bestIndex = index
-            end
-        end
-
-        while bestIndex < #waypoints
-            and Movement.IsNear(rootPos, waypoints[bestIndex], runtime.pathWaypointRadius) do
-            bestIndex = bestIndex + 1
-        end
-
-        state.waypointIndex = math.clamp(bestIndex, 1, #waypoints)
-    end
-
-    local function refreshPath(goalPos, force)
-        local rootPart = Movement.GetRootPart()
-
-        if not rootPart or not goalPos then
-            state.waypoints = nil
-            state.pathGoal = nil
-            return false
-        end
-
-        local now = os.clock()
-        local sameGoal = state.pathGoal and Movement.HorizontalDistance(state.pathGoal, goalPos) < 2
-
-        if not force and sameGoal and state.waypoints and now - state.lastPathCalc < runtime.pathRecalcInterval then
-            syncWaypointIndex(rootPart.Position, state.waypoints)
-            return true
-        end
-
-        PathService.Invalidate()
-
-        local waypoints, found = PathService.ComputePathBetween(rootPart.Position, goalPos)
-
-        if not waypoints or #waypoints == 0 then
-            state.waypoints = nil
-            state.pathGoal = goalPos
-            state.lastPathCalc = now
-            return false
-        end
-
-        state.waypoints = waypoints
-        state.pathGoal = goalPos
-        state.lastPathCalc = now
-        syncWaypointIndex(rootPart.Position, waypoints)
-
-        return waypoints ~= nil
-    end
-
-    local function followPath(goalPos, arriveRadius)
-        setServerActionMode(false)
-
-        if Movement.EnsureLocomotion then
-            Movement.EnsureLocomotion()
-        end
-
-        local rootPart = Movement.GetRootPart()
-
-        if not rootPart then
-            return false
-        end
-
-        arriveRadius = arriveRadius or runtime.standbyArriveRadius
-
-        if Movement.IsNear(rootPart.Position, goalPos, arriveRadius) then
-            Movement.CancelMovement()
-            return true
-        end
-
-        refreshPath(goalPos, false)
-
-        local waypoints = state.waypoints
-        local moveTarget = goalPos
-
-        if waypoints and #waypoints > 0 then
-            syncWaypointIndex(rootPart.Position, waypoints)
-
-            if Movement.IsNear(rootPart.Position, waypoints[state.waypointIndex], runtime.pathWaypointRadius)
-                and state.waypointIndex < #waypoints then
-                state.waypointIndex = state.waypointIndex + 1
-            end
-
-            moveTarget = waypoints[state.waypointIndex] or waypoints[#waypoints]
-        elseif PathService.IsLineClearBetween and PathService.IsLineClearBetween(rootPart.Position, goalPos) then
-            moveTarget = goalPos
-        else
-            refreshPath(goalPos, true)
-            waypoints = state.waypoints
-
-            if waypoints and #waypoints > 0 then
-                syncWaypointIndex(rootPart.Position, waypoints)
-                moveTarget = waypoints[state.waypointIndex] or waypoints[#waypoints]
-            else
-                moveTarget = goalPos
-            end
-        end
-
-        if not waypoints or #waypoints == 0 then
-            if not Movement.IsActivelyMovingTo or not Movement.IsActivelyMovingTo(moveTarget) then
-                Movement.MoveToward(moveTarget)
-            end
-        elseif not Movement.IsActivelyMovingTo or not Movement.IsActivelyMovingTo(moveTarget) then
-            Movement.MoveToward(moveTarget, function(completed)
-                if not completed or not state.enabled then
-                    return
-                end
-
-                local currentRoot = Movement.GetRootPart()
-
-                if not currentRoot then
-                    return
-                end
-
-                if Movement.IsNear(currentRoot.Position, goalPos, arriveRadius) then
-                    return
-                end
-
-                if waypoints and state.waypointIndex < #waypoints then
-                    state.waypointIndex = state.waypointIndex + 1
+            end)
+
+            window.InputChanged:Connect(function(input)
+                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                    local delta = input.Position - dragStart
+                    window.Position = UDim2.new(
+                        startPos.X.Scale,
+                        startPos.X.Offset + delta.X,
+                        startPos.Y.Scale,
+                        startPos.Y.Offset + delta.Y
+                    )
                 end
             end)
         end
 
-        if state.lastPosition and Movement.HorizontalDistance(rootPart.Position, state.lastPosition) < 0.2
-            and (Movement.IsTweening() or Movement.IsWalking()) then
-            state.stuckTimer = state.stuckTimer + 1
+        ---------------------------------------------------------------------
+        -- TOP BAR (Header)
+        ---------------------------------------------------------------------
+        local topBar = Instance.new("Frame")
+        topBar.Name = "TopBar"
+        topBar.Size = UDim2.new(1, 0, 0, 52)
+        topBar.BackgroundColor3 = colors.sidebar
+        topBar.BorderSizePixel = 0
+        topBar.ZIndex = 2
+        topBar.Parent = window
+        corner(topBar, 12)
 
-            local stuckThreshold = runtime.autoFarmPathStuckTicks or 25
+        -- Square bottom corners for header
+        local topBarCover = Instance.new("Frame")
+        topBarCover.Position = UDim2.new(0, 0, 1, -8)
+        topBarCover.Size = UDim2.new(1, 0, 0, 8)
+        topBarCover.BackgroundColor3 = colors.sidebar
+        topBarCover.BorderSizePixel = 0
+        topBarCover.ZIndex = 2
+        topBarCover.Parent = topBar
 
-            if state.stuckTimer >= stuckThreshold then
-                Movement.CancelMovement()
-                if Movement.EnsureLocomotion then
-                    Movement.EnsureLocomotion()
-                end
-                state.waypointIndex = math.min((state.waypointIndex or 1) + 1, #(waypoints or { 1 }))
-                refreshPath(goalPos, true)
-                state.stuckTimer = 0
-                Movement.MoveToward(moveTarget)
+        local headerLine = Instance.new("Frame")
+        headerLine.Position = UDim2.new(0, 0, 1, 0)
+        headerLine.Size = UDim2.new(1, 0, 0, 1)
+        headerLine.BackgroundColor3 = colors.panelBorder
+        headerLine.BorderSizePixel = 0
+        headerLine.ZIndex = 3
+        headerLine.Parent = topBar
+
+        -- Left Brand: Vx Logo + VENYX / Steal An Egg v1.7.2
+        local brandContainer = Instance.new("Frame")
+        brandContainer.BackgroundTransparency = 1
+        brandContainer.Position = UDim2.fromOffset(14, 0)
+        brandContainer.Size = UDim2.new(0, 500, 1, 0)
+        brandContainer.ZIndex = 10
+        brandContainer.Parent = topBar
+
+        local brandLayout = Instance.new("UIListLayout")
+        brandLayout.FillDirection = Enum.FillDirection.Horizontal
+        brandLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+        brandLayout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+        brandLayout.Padding = UDim.new(0, 8)
+        brandLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        brandLayout.Parent = brandContainer
+
+        -- Stylized Vx Logo
+        local logoBox = Instance.new("Frame")
+        logoBox.LayoutOrder = 1
+        logoBox.Size = UDim2.fromOffset(26, 26)
+        logoBox.BackgroundColor3 = Color3.fromRGB(24, 26, 36)
+        logoBox.BorderSizePixel = 0
+        logoBox.ZIndex = 11
+        logoBox.Parent = brandContainer
+        corner(logoBox, 6)
+        stroke(logoBox, colors.panelBorder, 1)
+
+        local logoText = text(logoBox, "Vx", 13, colors.text, Enum.Font.GothamBlack)
+        logoText.TextXAlignment = Enum.TextXAlignment.Center
+        logoText.ZIndex = 12
+
+        -- "VENYX" Title
+        local venyxLabel = text(brandContainer, "VENYX", 14, colors.text, Enum.Font.GothamBold)
+        venyxLabel.LayoutOrder = 2
+        venyxLabel.Size = UDim2.fromOffset(56, 26)
+        venyxLabel.ZIndex = 11
+
+        -- "/" Separator
+        local sepLabel = text(brandContainer, "/", 13, colors.subtext, Enum.Font.GothamBold)
+        sepLabel.LayoutOrder = 3
+        sepLabel.Size = UDim2.fromOffset(8, 26)
+        sepLabel.ZIndex = 11
+
+        -- "Steal An Egg" Subtitle
+        local gameLabel = text(brandContainer, "Steal An Egg", 13, colors.muted, Enum.Font.GothamSemibold)
+        gameLabel.LayoutOrder = 4
+        gameLabel.Size = UDim2.fromOffset(84, 26)
+        gameLabel.ZIndex = 11
+
+        -- "v1.7.2" Version Badge
+        local verBadge = Instance.new("Frame")
+        verBadge.LayoutOrder = 5
+        verBadge.Size = UDim2.fromOffset(46, 20)
+        verBadge.BackgroundColor3 = Color3.fromRGB(24, 27, 36)
+        verBadge.BorderSizePixel = 0
+        verBadge.ZIndex = 11
+        verBadge.Parent = brandContainer
+        corner(verBadge, 5)
+        stroke(verBadge, colors.panelBorder, 1)
+
+        local verLabel = text(verBadge, "v1.7.2", 10, colors.muted, Enum.Font.GothamMedium)
+        verLabel.TextXAlignment = Enum.TextXAlignment.Center
+        verLabel.ZIndex = 12
+
+        -- Live Status Pill: "● Caught Void Pearl x19"
+        local statusPill = Instance.new("Frame")
+        statusPill.LayoutOrder = 6
+        statusPill.Size = UDim2.fromOffset(170, 24)
+        statusPill.BackgroundColor3 = Color3.fromRGB(20, 23, 31)
+        statusPill.BorderSizePixel = 0
+        statusPill.ZIndex = 11
+        statusPill.Parent = brandContainer
+        corner(statusPill, 12)
+        stroke(statusPill, colors.cardBorder, 1)
+
+        local dot = Instance.new("Frame")
+        dot.Size = UDim2.fromOffset(7, 7)
+        dot.Position = UDim2.fromOffset(10, 8.5)
+        dot.BackgroundColor3 = colors.green
+        dot.BorderSizePixel = 0
+        dot.ZIndex = 12
+        dot.Parent = statusPill
+        corner(dot, 4)
+
+        statusPillText = text(statusPill, "Caught Void Pearl x19", 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(23, 0), UDim2.new(1, -28, 1, 0))
+        statusPillText.ZIndex = 12
+
+        -- Top Right Actions: Language, Search, Minimize, Close
+        local topActions = Instance.new("Frame")
+        topActions.BackgroundTransparency = 1
+        topActions.AnchorPoint = Vector2.new(1, 0.5)
+        topActions.Position = UDim2.new(1, -12, 0.5, 0)
+        topActions.Size = UDim2.fromOffset(360, 32)
+        topActions.ZIndex = 10
+        topActions.Parent = topBar
+
+        local topActionsLayout = Instance.new("UIListLayout")
+        topActionsLayout.FillDirection = Enum.FillDirection.Horizontal
+        topActionsLayout.VerticalAlignment = Enum.VerticalAlignment.Center
+        topActionsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+        topActionsLayout.Padding = UDim.new(0, 8)
+        topActionsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        topActionsLayout.Parent = topActions
+
+        -- Language Selector Pill: "文A English"
+        local langBtn = Instance.new("TextButton")
+        langBtn.LayoutOrder = 1
+        langBtn.Size = UDim2.fromOffset(88, 28)
+        langBtn.BackgroundColor3 = colors.panel
+        langBtn.BorderSizePixel = 0
+        langBtn.Text = "文A  " .. (runtime.uiLanguage or "English")
+        langBtn.Font = Enum.Font.GothamSemibold
+        langBtn.TextSize = 11
+        langBtn.TextColor3 = colors.text
+        langBtn.AutoButtonColor = false
+        langBtn.ZIndex = 11
+        langBtn.Parent = topActions
+        corner(langBtn, 7)
+        stroke(langBtn, colors.cardBorder, 1)
+
+        langBtn.Activated:Connect(function()
+            if runtime.uiLanguage == "English" then
+                runtime.uiLanguage = "Tiếng Việt"
+            else
+                runtime.uiLanguage = "English"
             end
-        else
-            state.stuckTimer = 0
-        end
-
-        state.lastPosition = rootPart.Position
-
-        return Movement.IsNear(rootPart.Position, goalPos, arriveRadius)
-    end
-
-    local function shouldWalkPickupSync()
-        return runtime.autoFarmWalkPickupSync ~= false
-    end
-
-    local function carryRadius()
-        return runtime.pickupCarryRadius or CARRY_RADIUS
-    end
-
-    local function pickupMoveRadius()
-        return runtime.pickupMoveRadius
-            or runtime.pathWaypointRadius
-            or PICKUP_MOVE_RADIUS
-    end
-
-    local function eggDistance(rootPos, eggPos)
-        return (rootPos - eggPos).Magnitude
-    end
-
-    local function refreshEggPosition(egg)
-        if not egg or not EggData.FindByUid then
-            return egg
-        end
-
-        local refreshed = EggData.FindByUid(egg.uid, true)
-
-        if refreshed then
-            state.targetEgg = refreshed
-            return refreshed
-        end
-
-        return egg
-    end
-
-    local function approachForServerSync(rootPart, targetPos, arriveRadius)
-        if not shouldWalkPickupSync() then
-            return eggDistance(rootPart.Position, targetPos) <= arriveRadius
-        end
-
-        if eggDistance(rootPart.Position, targetPos) > arriveRadius then
-            Movement.WalkTo(targetPos, runtime.pickupSyncWalkSpeed or 24)
-            state.pickupSettleTicks = 0
-            return false
-        end
-
-        local settleTicks = runtime.pickupSyncSettleTicks or 4
-
-        if (state.pickupSettleTicks or 0) < settleTicks then
-            state.pickupSettleTicks = (state.pickupSettleTicks or 0) + 1
-            Movement.WalkTo(targetPos, runtime.pickupSyncWalkSpeed or 24)
-            return false
-        end
-
-        return true
-    end
-
-    local function prepareForPickup(rootPart, eggPos)
-        if eggDistance(rootPart.Position, eggPos) > carryRadius() then
-            Movement.PrepareForServerAction()
-            Movement.WalkTo(eggPos, runtime.pickupSyncWalkSpeed or 24)
-            state.pickupSettleTicks = 0
-            return false
-        end
-
-        Movement.WalkTo(eggPos, runtime.pickupSyncWalkSpeed or 24)
-
-        local settleTicks = runtime.pickupSyncSettleTicks or 4
-
-        if (state.pickupSettleTicks or 0) < settleTicks then
-            state.pickupSettleTicks = (state.pickupSettleTicks or 0) + 1
-            return false
-        end
-
-        return true
-    end
-
-    local function tryPickupEgg()
-        local egg = refreshEggPosition(state.targetEgg)
-
-        if not egg or not egg.record then
-            setServerActionMode(false)
-            return false
-        end
-
-        local now = os.clock()
-        if (state.lastPickupAttemptAt or 0) > now - 0.5 then
-            return false
-        end
-        state.lastPickupAttemptAt = now
-
-        local slotKey = resolveSlotKey(egg.record)
-        local callOk, ok, reason = pcall(function()
-            return EggState.CarryFieldEgg(egg.record.Uid, slotKey)
+            langBtn.Text = "文A  " .. runtime.uiLanguage
         end)
 
-        if not callOk then
-            reason = tostring(ok)
-            ok = false
-        end
+        -- Search Bar: "🔍 Search"
+        local searchContainer = Instance.new("Frame")
+        searchContainer.LayoutOrder = 2
+        searchContainer.Size = UDim2.fromOffset(130, 28)
+        searchContainer.BackgroundColor3 = colors.panel
+        searchContainer.BorderSizePixel = 0
+        searchContainer.ZIndex = 11
+        searchContainer.Parent = topActions
+        corner(searchContainer, 7)
+        stroke(searchContainer, colors.cardBorder, 1)
 
-        if ok == true then
-            setServerActionMode(false)
-            state.pickupSettleTicks = 0
-            state.pickupFailCount = 0
-            -- FIX: reset trust retry count on successful pickup
-            state.trustRetryCount = 0
-            state.isCarrying = true
-            state.carryUid = egg.record.Uid
-            state.carryConfirmedAt = os.clock()
-            clearTargetPath()
-            PathService.Invalidate()
-            return true
-        end
+        local searchBox = Instance.new("TextBox")
+        searchBox.Size = UDim2.new(1, -16, 1, 0)
+        searchBox.Position = UDim2.fromOffset(10, 0)
+        searchBox.BackgroundTransparency = 1
+        searchBox.PlaceholderText = "🔍 Search"
+        searchBox.PlaceholderColor3 = colors.muted
+        searchBox.Text = ""
+        searchBox.Font = Enum.Font.GothamSemibold
+        searchBox.TextSize = 11
+        searchBox.TextColor3 = colors.text
+        searchBox.ClearTextOnFocus = false
+        searchBox.ZIndex = 12
+        searchBox.Parent = searchContainer
 
-        if reason then
-            state.detail = string.format("denied: %s", reason)
+        -- Search filtering logic across visible cards/rows
+        searchBox:GetPropertyChangedSignal("Text"):Connect(function()
+            local query = tostring(searchBox.Text):lower():gsub("^%s*(.-)%s*$", "%1")
+            local activePage = pageFrames[currentTabId]
+            if not activePage then return end
 
-            if tostring(reason):lower():find("not currently trusted", 1, true) then
-                -- FIX: count trust retries; don't reset pickupFailCount so failsafe works
-                state.trustRetryCount = (state.trustRetryCount or 0) + 1
-                local maxTrustRetries = runtime.autoFarmMaxTrustRetries or 6
-
-                if state.trustRetryCount >= maxTrustRetries then
-                    -- Blacklist this egg and move on; too many trust failures
-                    local uid = egg.record and egg.record.Uid
-                    if uid then
-                        state.blacklistedEggUids[uid] = os.clock() + 60
-                        print(string.format("[EggESP Auto] Trust failed %d times for %s – blacklisted 60s", state.trustRetryCount, uid))
-                    end
-                    state.trustRetryCount = 0
-                    state.targetEgg = nil
-                    clearTargetPath()
-                    setServerActionMode(false)
-                    setPhase(PHASE.Standby, "trust sync failed")
-                    return false
-                end
-
-                -- Extend retry window and walk toward egg to establish server-side locomotion trust
-                state.movementTrustRetryAt = os.clock() + 2.5
-                state.pickupSettleTicks = 0
-                -- NOTE: intentionally NOT resetting pickupFailCount here
-                if Movement.PrepareForServerAction then
-                    Movement.PrepareForServerAction()
-                end
-                return false
-            end
-        end
-
-        state.pickupSettleTicks = 0
-        state.pickupFailCount = (state.pickupFailCount or 0) + 1
-        local maxFails = runtime.autoFarmPickupMaxFails or 5
-
-        if state.pickupFailCount >= maxFails then
-            state.pickupFailCount = 0
-            state.targetEgg = nil
-            clearTargetPath()
-            setServerActionMode(false)
-            setPhase(PHASE.Standby, reason or "pickup failed")
-        end
-
-        return false
-    end
-
-    local function tickGoToEgg(rootPart, egg)
-        local function moveEgg(targetPos)
-            local method = tostring(runtime.moveToEggMethod or "Teleport")
-
-            if method == "Teleport" and Movement.TeleportTo then
-                return Movement.TeleportTo(targetPos)
-            end
-
-            -- FIX: case-insensitive comparison for "Quick Steps" / "Quick steps"
-            if method:lower() == "quick steps" then
-                local rootPartNow = Movement.GetRootPart()
-
-                if rootPartNow then
-                    local delta = targetPos - rootPartNow.Position
-                    local flat = Vector3.new(delta.X, 0, delta.Z)
-
-                    if flat.Magnitude > 60 then
-                        flat = flat.Unit * 60
-                    end
-
-                    if Movement.TeleportTo then
-                        return Movement.TeleportTo(rootPartNow.Position + flat)
-                    end
-
-                    return Movement.WalkTo(rootPartNow.Position + flat, 32)
-                end
-            end
-
-            if method == "Fast Tween" and Movement.TweenTo then
-                Movement.TweenTo(targetPos, math.max(runtime.tweenSpeed or 700, 900))
-                return true
-            end
-
-            if Movement.WalkTo then
-                return Movement.WalkTo(targetPos, runtime.pickupSyncWalkSpeed or 28)
-            end
-
-            return false
-        end
-
-        if (state.movementTrustRetryAt or 0) > os.clock() then
-            setPhase(PHASE.Pickup, "syncing movement trust")
-            if Movement.EnsureLocomotion then Movement.EnsureLocomotion() end
-            if Movement.PrepareForServerAction then Movement.PrepareForServerAction() end
-            -- FIX: actively walk toward egg so the server registers player locomotion
-            -- (trust is based on movement detection, not just calling PrepareForServerAction)
-            local trustEgg = state.targetEgg
-            if trustEgg and trustEgg.worldPos and Movement.WalkTo then
-                Movement.WalkTo(trustEgg.worldPos, runtime.pickupSyncWalkSpeed or 24)
-            end
-            return
-        end
-
-        egg = refreshEggPosition(egg)
-        local eggPos = egg.worldPos
-        local dist = eggDistance(rootPart.Position, eggPos)
-        local carryR = carryRadius()
-        local moveR = pickupMoveRadius()
-
-        if state.phase == PHASE.Pickup or dist <= moveR then
-            setPhase(PHASE.Pickup, dist <= carryR and egg.info.name or "approaching")
-
-            if dist > carryR then
-                moveEgg(eggPos)
-                state.pickupSettleTicks = 0
-                return
-            end
-
-            if not prepareForPickup(rootPart, eggPos) then
-                return
-            end
-
-            Movement.CancelMovement()
-
-            if tryPickupEgg() then
-                state.targetEgg = nil
-                setPhase(PHASE.ReturnStandby, egg.info.name)
-            elseif not state.isCarrying then
-                Movement.WalkTo(eggPos, runtime.pickupSyncWalkSpeed or 24)
-            else
-                setPhase(PHASE.ReturnStandby, egg.info.name)
-            end
-
-            return
-        end
-
-        setServerActionMode(false)
-        moveEgg(eggPos)
-    end
-
-    local function shouldAutoPlaceDuringFarm()
-        if state.rushFarmAfterDay then
-            return false
-        end
-
-        if not InventoryManager or not InventoryManager.ShouldAutoPlaceDue then
-            return false
-        end
-
-        if not InventoryManager.ShouldAutoPlaceDue() then
-            return false
-        end
-
-        local interval = runtime.autoPlaceInterval or 60
-        local farmAge = os.clock() - (state.farmStartedAt or 0)
-
-        return farmAge >= interval
-    end
-
-    local function beginGoToEgg()
-        if EggData.InvalidateCache then
-            EggData.InvalidateCache()
-        end
-
-        local egg = findRarestEgg(true)
-
-        if not egg then
-            return false
-        end
-
-        state.lastTargetRefresh = os.clock()
-        setTargetEgg(egg, false)
-        state.rushFarmAfterDay = false
-        state.lastPathCalc = 0
-        setPhase(PHASE.GoToEgg, formatTargetDetail(egg))
-        return true
-    end
-
-    local function tick()
-        local function moveDelivery(targetPos)
-            local method = tostring(runtime.deliveryMethod or "Fast Tween")
-
-            if method == "Teleport" and Movement.TeleportTo then
-                return Movement.TeleportTo(targetPos)
-            end
-
-            -- FIX: case-insensitive comparison for "Quick Steps" / "Quick steps"
-            if method:lower() == "quick steps" then
-                local rootPart = Movement.GetRootPart()
-
-                if rootPart then
-                    local delta = targetPos - rootPart.Position
-                    local flat = Vector3.new(delta.X, 0, delta.Z)
-
-                    if flat.Magnitude > 50 then
-                        flat = flat.Unit * 50
-                    end
-
-                    if Movement.TeleportTo then
-                        return Movement.TeleportTo(rootPart.Position + flat)
-                    end
-
-                    if Movement.WalkTo then
-                        return Movement.WalkTo(rootPart.Position + flat, 32)
+            for _, desc in ipairs(activePage:GetDescendants()) do
+                if desc:IsA("Frame") and desc:FindFirstChild("__IS_CONTROL_ROW") then
+                    local rowTitle = desc:FindFirstChild("__ROW_TITLE")
+                    if rowTitle and rowTitle:IsA("TextLabel") then
+                        local t = rowTitle.Text:lower()
+                        desc.Visible = query == "" or t:find(query, 1, true) ~= nil
                     end
                 end
             end
+        end)
 
-            if method == "Fast Tween" and Movement.TweenTo then
-                Movement.TweenTo(targetPos, math.max(runtime.tweenSpeed or 700, 1000))
-                return true
+        -- Minimize Button
+        local minBtn = Instance.new("TextButton")
+        minBtn.LayoutOrder = 3
+        minBtn.Size = UDim2.fromOffset(28, 28)
+        minBtn.BackgroundColor3 = colors.panel
+        minBtn.BorderSizePixel = 0
+        minBtn.Text = "—"
+        minBtn.Font = Enum.Font.GothamBold
+        minBtn.TextSize = 12
+        minBtn.TextColor3 = colors.muted
+        minBtn.AutoButtonColor = false
+        minBtn.ZIndex = 11
+        minBtn.Parent = topActions
+        corner(minBtn, 7)
+        stroke(minBtn, colors.cardBorder, 1)
+
+        minBtn.Activated:Connect(function()
+            window.Visible = false
+            visible = false
+            runtime.hubVisible = false
+        end)
+
+        -- Close Button
+        local closeBtn = Instance.new("TextButton")
+        closeBtn.LayoutOrder = 4
+        closeBtn.Size = UDim2.fromOffset(28, 28)
+        closeBtn.BackgroundColor3 = colors.panel
+        closeBtn.BorderSizePixel = 0
+        closeBtn.Text = "×"
+        closeBtn.Font = Enum.Font.GothamBold
+        closeBtn.TextSize = 15
+        closeBtn.TextColor3 = colors.muted
+        closeBtn.AutoButtonColor = false
+        closeBtn.ZIndex = 11
+        closeBtn.Parent = topActions
+        corner(closeBtn, 7)
+        stroke(closeBtn, colors.cardBorder, 1)
+
+        closeBtn.Activated:Connect(function()
+            window.Visible = false
+            visible = false
+            runtime.hubVisible = false
+        end)
+
+        ---------------------------------------------------------------------
+        -- SIDEBAR (Left Icons)
+        ---------------------------------------------------------------------
+        local sidebar = Instance.new("Frame")
+        sidebar.Name = "Sidebar"
+        sidebar.Position = UDim2.fromOffset(0, 52)
+        sidebar.Size = UDim2.new(0, 60, 1, -52)
+        sidebar.BackgroundColor3 = colors.sidebar
+        sidebar.BorderSizePixel = 0
+        sidebar.ZIndex = 3
+        sidebar.Parent = window
+
+        local sidebarLine = Instance.new("Frame")
+        sidebarLine.Position = UDim2.new(1, 0, 0, 0)
+        sidebarLine.Size = UDim2.new(0, 1, 1, 0)
+        sidebarLine.BackgroundColor3 = colors.panelBorder
+        sidebarLine.BorderSizePixel = 0
+        sidebarLine.ZIndex = 4
+        sidebarLine.Parent = sidebar
+
+        local navList = Instance.new("Frame")
+        navList.BackgroundTransparency = 1
+        navList.Position = UDim2.fromOffset(7, 14)
+        navList.Size = UDim2.new(1, -14, 1, -80)
+        navList.ZIndex = 4
+        navList.Parent = sidebar
+
+        local navLayout = Instance.new("UIListLayout")
+        navLayout.FillDirection = Enum.FillDirection.Vertical
+        navLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        navLayout.Padding = UDim.new(0, 8)
+        navLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        navLayout.Parent = navList
+
+        local tabsData = {
+            { id = "Home", icon = "⌂", title = "Home" },
+            { id = "Steal", icon = "◎", title = "Steal" },
+            { id = "Pet", icon = "✿", title = "Pets" },
+            { id = "ESP", icon = "✦", title = "Visuals" },
+            { id = "Player", icon = "♟", title = "Player" },
+            { id = "Settings", icon = "⚙", title = "Settings" },
+        }
+
+        local function updateSidebarSelection(selectedId)
+            currentTabId = selectedId
+            for id, btn in pairs(navButtons) do
+                local isSel = id == selectedId
+                btn.BackgroundColor3 = isSel and Color3.fromRGB(28, 30, 42) or Color3.fromRGB(11, 12, 16)
+                local btnStroke = btn:FindFirstChildOfClass("UIStroke")
+                if btnStroke then
+                    btnStroke.Color = isSel and Color3.fromRGB(58, 62, 84) or Color3.fromRGB(11, 12, 16)
+                    btnStroke.Transparency = isSel and 0 or 1
+                end
+                local iconLbl = btn:FindFirstChildOfClass("TextLabel")
+                if iconLbl then
+                    iconLbl.TextColor3 = isSel and colors.text or colors.muted
+                end
+            end
+            for id, page in pairs(pageFrames) do
+                page.Visible = id == selectedId
+            end
+            closeActiveDropdown()
+        end
+
+        for idx, tabInfo in ipairs(tabsData) do
+            local btn = Instance.new("TextButton")
+            btn.Name = tabInfo.id .. "NavBtn"
+            btn.LayoutOrder = idx
+            btn.Size = UDim2.fromOffset(42, 42)
+            btn.BackgroundColor3 = tabInfo.id == "Steal" and Color3.fromRGB(28, 30, 42) or Color3.fromRGB(11, 12, 16)
+            btn.BorderSizePixel = 0
+            btn.Text = ""
+            btn.AutoButtonColor = false
+            btn.ZIndex = 5
+            btn.Parent = navList
+            corner(btn, 12)
+            local s = stroke(btn, Color3.fromRGB(58, 62, 84), 1)
+            s.Transparency = tabInfo.id == "Steal" and 0 or 1
+
+            local iconLbl = text(btn, tabInfo.icon, 18, tabInfo.id == "Steal" and colors.text or colors.muted)
+            iconLbl.TextXAlignment = Enum.TextXAlignment.Center
+            iconLbl.ZIndex = 10
+
+            btn.Activated:Connect(function()
+                runWithPluginIdentity(function()
+                    updateSidebarSelection(tabInfo.id)
+                end)
+            end)
+
+            navButtons[tabInfo.id] = btn
+        end
+
+        -- Bottom Avatar: User Headshot
+        local avatarFrame = Instance.new("Frame")
+        avatarFrame.AnchorPoint = Vector2.new(0.5, 1)
+        avatarFrame.Position = UDim2.new(0.5, 0, 1, -12)
+        avatarFrame.Size = UDim2.fromOffset(36, 36)
+        avatarFrame.BackgroundColor3 = colors.card
+        avatarFrame.BorderSizePixel = 0
+        avatarFrame.ZIndex = 5
+        avatarFrame.Parent = sidebar
+        corner(avatarFrame, 18)
+        stroke(avatarFrame, colors.cardBorder, 1)
+
+        local avatarImg = Instance.new("ImageLabel")
+        avatarImg.Size = UDim2.fromScale(1, 1)
+        avatarImg.BackgroundTransparency = 1
+        avatarImg.Image = string.format("rbxthumb://type=AvatarHeadShot&id=%d&w=150&h=150", LocalPlayer.UserId)
+        avatarImg.ZIndex = 6
+        avatarImg.Parent = avatarFrame
+        corner(avatarImg, 18)
+
+        ---------------------------------------------------------------------
+        -- MAIN CONTENT AREA
+        ---------------------------------------------------------------------
+        local mainArea = Instance.new("Frame")
+        mainArea.Name = "MainArea"
+        mainArea.Position = UDim2.fromOffset(61, 52)
+        mainArea.Size = UDim2.new(1, -61, 1, -52)
+        mainArea.BackgroundColor3 = colors.bg
+        mainArea.BorderSizePixel = 0
+        mainArea.ZIndex = 2
+        mainArea.Parent = window
+
+        -- Overlay container for floating dropdown menus
+        local overlay = Instance.new("Frame")
+        overlay.Name = "DropdownOverlay"
+        overlay.Size = UDim2.fromScale(1, 1)
+        overlay.BackgroundTransparency = 1
+        overlay.ZIndex = 50
+        overlay.Parent = window
+
+        ---------------------------------------------------------------------
+        -- HELPER COMPONENT BUILDERS (Matching Venyx UI precisely)
+        ---------------------------------------------------------------------
+
+        -- Collapsible Section Card
+        local function createCard(parent, title, iconSymbol, defaultCollapsed)
+            local card = Instance.new("Frame")
+            card.Size = UDim2.new(1, 0, 0, 0)
+            card.AutomaticSize = Enum.AutomaticSize.Y
+            card.BackgroundColor3 = colors.panel
+            card.BorderSizePixel = 0
+            card.ZIndex = 3
+            card.Parent = parent
+            corner(card, 12)
+            stroke(card, colors.panelBorder, 1)
+
+            local cardHeader = Instance.new("TextButton")
+            cardHeader.Size = UDim2.new(1, 0, 0, 42)
+            cardHeader.BackgroundTransparency = 1
+            cardHeader.Text = ""
+            cardHeader.AutoButtonColor = false
+            cardHeader.ZIndex = 4
+            cardHeader.Parent = card
+
+            local headerTitle = text(cardHeader, (iconSymbol and (iconSymbol .. "  ") or "") .. title, 12, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(1, -50, 1, 0))
+            headerTitle.ZIndex = 10
+
+            local chevron = text(cardHeader, defaultCollapsed and ">" or "v", 12, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -30, 0, 0), UDim2.fromOffset(20, 42))
+            chevron.TextXAlignment = Enum.TextXAlignment.Center
+            chevron.ZIndex = 10
+
+            local body = Instance.new("Frame")
+            body.Name = "CardBody"
+            body.Position = UDim2.fromOffset(0, 42)
+            body.Size = UDim2.new(1, 0, 0, 0)
+            body.AutomaticSize = Enum.AutomaticSize.Y
+            body.BackgroundTransparency = 1
+            body.Visible = not defaultCollapsed
+            body.ZIndex = 4
+            body.Parent = card
+
+            local bodyLayout = Instance.new("UIListLayout")
+            bodyLayout.Padding = UDim.new(0, 6)
+            bodyLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            bodyLayout.Parent = body
+
+            local bodyPadding = Instance.new("UIPadding")
+            bodyPadding.PaddingTop = UDim.new(0, 4)
+            bodyPadding.PaddingBottom = UDim.new(0, 14)
+            bodyPadding.PaddingLeft = UDim.new(0, 16)
+            bodyPadding.PaddingRight = UDim.new(0, 16)
+            bodyPadding.Parent = body
+
+            cardHeader.Activated:Connect(function()
+                closeActiveDropdown()
+                body.Visible = not body.Visible
+                chevron.Text = body.Visible and "v" or ">"
+            end)
+
+            return card, body
+        end
+
+        -- Row Container with Title
+        local function createRow(parent, labelText)
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 36)
+            row.BackgroundTransparency = 1
+            row.BorderSizePixel = 0
+            row.ZIndex = 5
+            row.Parent = parent
+
+            local mark = Instance.new("Folder")
+            mark.Name = "__IS_CONTROL_ROW"
+            mark.Parent = row
+
+            local title = text(row, labelText, 12, colors.text, Enum.Font.GothamSemibold, UDim2.fromOffset(0, 0), UDim2.new(0.48, 0, 1, 0))
+            title.Name = "__ROW_TITLE"
+            title.ZIndex = 10
+
+            local rightSlot = Instance.new("Frame")
+            rightSlot.AnchorPoint = Vector2.new(1, 0.5)
+            rightSlot.Position = UDim2.new(1, 0, 0.5, 0)
+            rightSlot.Size = UDim2.new(0.52, 0, 1, 0)
+            rightSlot.BackgroundTransparency = 1
+            rightSlot.ZIndex = 6
+            rightSlot.Parent = row
+
+            return row, rightSlot
+        end
+
+        -- Modern Toggle Switch (Pill with circular knob)
+        local function addToggle(parent, labelText, getValue, setValue)
+            local row, rightSlot = createRow(parent, labelText)
+
+            local switch = Instance.new("TextButton")
+            switch.AnchorPoint = Vector2.new(1, 0.5)
+            switch.Position = UDim2.new(1, 0, 0.5, 0)
+            switch.Size = UDim2.fromOffset(42, 22)
+            switch.BackgroundColor3 = colors.toggleInactive
+            switch.BorderSizePixel = 0
+            switch.Text = ""
+            switch.AutoButtonColor = false
+            switch.ZIndex = 7
+            switch.Parent = rightSlot
+            corner(switch, 11)
+            stroke(switch, colors.cardBorder, 1)
+
+            local knob = Instance.new("Frame")
+            knob.Size = UDim2.fromOffset(16, 16)
+            knob.Position = UDim2.fromOffset(3, 3)
+            knob.BackgroundColor3 = colors.knob
+            knob.BorderSizePixel = 0
+            knob.ZIndex = 8
+            knob.Parent = switch
+            corner(knob, 8)
+
+            local function updateVisual(enabled)
+                if enabled then
+                    switch.BackgroundColor3 = colors.toggleActive
+                    knob.Position = UDim2.fromOffset(23, 3)
+                else
+                    switch.BackgroundColor3 = colors.toggleInactive
+                    knob.Position = UDim2.fromOffset(3, 3)
+                end
             end
 
-            if followPath then
-                return followPath(targetPos, runtime.standbyArriveRadius)
+            updateVisual(getValue() == true)
+
+            local function trigger()
+                runWithPluginIdentity(function()
+                    local current = getValue() == true
+                    local nextState = not current
+                    setValue(nextState)
+                    updateVisual(nextState)
+                end)
             end
 
-            return false
+            switch.Activated:Connect(trigger)
+            return row
         end
 
-        if not state.enabled then
-            return
-        end
+        -- Dropdown Button with Badges ("Cherry Blossom +4 v")
+        local function addDropdown(parent, labelText, options, isMultiSelect, getSelection, setSelection)
+            local row, rightSlot = createRow(parent, labelText)
 
-        if InventoryManager and InventoryManager.IsActive and InventoryManager.IsActive() then
-            local invStatus = InventoryManager.GetStatus and InventoryManager.GetStatus()
+            local btn = Instance.new("TextButton")
+            btn.AnchorPoint = Vector2.new(1, 0.5)
+            btn.Position = UDim2.new(1, 0, 0.5, 0)
+            btn.Size = UDim2.fromOffset(160, 28)
+            btn.BackgroundColor3 = colors.control
+            btn.BorderSizePixel = 0
+            btn.Text = ""
+            btn.AutoButtonColor = false
+            btn.ZIndex = 7
+            btn.Parent = rightSlot
+            corner(btn, 7)
+            stroke(btn, colors.controlBorder, 1)
 
-            if invStatus and invStatus.autoPlaceBackground then
-                InventoryManager.Tick()
-                return
+            local valLabel = text(btn, "None", 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(10, 0), UDim2.new(1, -48, 1, 0))
+            valLabel.ZIndex = 10
+            valLabel.ClipsDescendants = true
+
+            local badgePill = Instance.new("Frame")
+            badgePill.AnchorPoint = Vector2.new(1, 0.5)
+            badgePill.Position = UDim2.new(1, -22, 0.5, 0)
+            badgePill.Size = UDim2.fromOffset(24, 18)
+            badgePill.BackgroundColor3 = colors.badgeBg
+            badgePill.BorderSizePixel = 0
+            badgePill.Visible = false
+            badgePill.ZIndex = 10
+            badgePill.Parent = btn
+            corner(badgePill, 5)
+            stroke(badgePill, colors.badgeBorder, 1)
+
+            local badgeText = text(badgePill, "+0", 9, colors.muted, Enum.Font.GothamBold)
+            badgeText.TextXAlignment = Enum.TextXAlignment.Center
+            badgeText.ZIndex = 11
+
+            local chevron = text(btn, "v", 10, colors.muted, Enum.Font.GothamBold, UDim2.new(1, -18, 0, 0), UDim2.fromOffset(14, 28))
+            chevron.TextXAlignment = Enum.TextXAlignment.Center
+            chevron.ZIndex = 10
+
+            local function refreshButtonDisplay()
+                if isMultiSelect then
+                    local sel = getSelection() or {}
+                    local selectedList = {}
+                    for _, opt in ipairs(options) do
+                        local key = type(opt) == "table" and (opt.id or opt.label) or tostring(opt)
+                        if sel[key] == true then
+                            table.insert(selectedList, type(opt) == "table" and opt.label or key)
+                        end
+                    end
+                    if #selectedList == 0 then
+                        valLabel.Text = "None"
+                        valLabel.Size = UDim2.new(1, -44, 1, 0)
+                        badgePill.Visible = false
+                    elseif #selectedList == 1 then
+                        valLabel.Text = selectedList[1]
+                        valLabel.Size = UDim2.new(1, -44, 1, 0)
+                        badgePill.Visible = false
+                    else
+                        valLabel.Text = selectedList[1]
+                        valLabel.Size = UDim2.new(1, -54, 1, 0)
+                        badgePill.Visible = true
+                        badgeText.Text = "+" .. tostring(#selectedList - 1)
+                    end
+                else
+                    valLabel.Text = tostring(getSelection() or options[1] or "None")
+                    valLabel.Size = UDim2.new(1, -44, 1, 0)
+                    badgePill.Visible = false
+                end
             end
-        end
 
-        local rootPart = Movement.GetRootPart()
+            refreshButtonDisplay()
 
-        if not rootPart then
-            setPhase(PHASE.Idle, "no character")
-            return
-        end
-
-        if state.phase == PHASE.Idle then
-            setPhase(PHASE.Standby, "recovered")
-        end
-
-        noteProgress(rootPart.Position)
-        checkWatchdog(rootPart)
-
-        local standbyPos = runtime.standbyPosition
-        local atStandby = isAtStandby(rootPart.Position, standbyPos)
-        local atStandbyStart = isAtStandbyStart(rootPart.Position, standbyPos)
-
-        if state.isCarrying then
-            state.depositWaitSince = state.depositWaitSince or os.clock()
-
-            local depositApproach = runtime.depositApproachRadius or 24
-
-            if shouldWalkPickupSync()
-                and Movement.HorizontalDistance(rootPart.Position, standbyPos) <= depositApproach then
-                if not approachForServerSync(rootPart, standbyPos, runtime.standbyArriveRadius) then
-                    setPhase(PHASE.ReturnStandby, "sync home")
+            -- Open Dropdown Floating Menu
+            btn.Activated:Connect(function()
+                if activeDropdownMenu and activeDropdownMenu.Name == labelText .. "DropdownMenu" then
+                    closeActiveDropdown()
                     return
                 end
+                closeActiveDropdown()
 
-                setPhase(PHASE.WaitDeposit, "waiting for claim")
-                Movement.CancelMovement()
-                if Movement.EnsureLocomotion then
-                    Movement.EnsureLocomotion()
+                overlayDismiss.Visible = true
+
+                local absPos = btn.AbsolutePosition
+                local absSize = btn.AbsoluteSize
+
+                local menu = Instance.new("Frame")
+                menu.Name = labelText .. "DropdownMenu"
+                menu.Size = UDim2.fromOffset(math.max(170, absSize.X + 20), math.min(220, #options * 32 + 12))
+                menu.Position = UDim2.fromOffset(absPos.X - window.AbsolutePosition.X, absPos.Y - window.AbsolutePosition.Y + absSize.Y + 4)
+                menu.BackgroundColor3 = colors.card
+                menu.BorderSizePixel = 0
+                menu.ZIndex = 60
+                menu.Parent = overlay
+                corner(menu, 8)
+                stroke(menu, colors.cardBorder, 1)
+
+                activeDropdownMenu = menu
+
+                local scroll = Instance.new("ScrollingFrame")
+                scroll.Size = UDim2.new(1, -6, 1, -8)
+                scroll.Position = UDim2.fromOffset(3, 4)
+                scroll.BackgroundTransparency = 1
+                scroll.BorderSizePixel = 0
+                scroll.ScrollBarThickness = 3
+                scroll.ScrollBarImageColor3 = colors.accent
+                scroll.CanvasSize = UDim2.fromOffset(0, #options * 32)
+                scroll.ZIndex = 61
+                scroll.Parent = menu
+
+                local mLayout = Instance.new("UIListLayout")
+                mLayout.Padding = UDim.new(0, 2)
+                mLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                mLayout.Parent = scroll
+
+                for _, opt in ipairs(options) do
+                    local optKey = type(opt) == "table" and (opt.id or opt.label) or tostring(opt)
+                    local optLabel = type(opt) == "table" and opt.label or optKey
+
+                    local item = Instance.new("TextButton")
+                    item.Size = UDim2.new(1, 0, 0, 30)
+                    item.BackgroundColor3 = colors.card
+                    item.BorderSizePixel = 0
+                    item.Text = ""
+                    item.AutoButtonColor = false
+                    item.ZIndex = 62
+                    item.Parent = scroll
+                    corner(item, 6)
+
+                    local itemText = text(item, optLabel, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(26, 0), UDim2.new(1, -30, 1, 0))
+                    itemText.ZIndex = 65
+
+                    local indicator = Instance.new("Frame")
+                    indicator.Size = UDim2.fromOffset(12, 12)
+                    indicator.Position = UDim2.fromOffset(8, 9)
+                    indicator.BackgroundColor3 = colors.control
+                    indicator.BorderSizePixel = 0
+                    indicator.ZIndex = 65
+                    indicator.Parent = item
+                    corner(indicator, isMultiSelect and 3 or 6)
+
+                    local function isChecked()
+                        if isMultiSelect then
+                            local sel = getSelection() or {}
+                            return sel[optKey] == true
+                        else
+                            return tostring(getSelection()) == optKey
+                        end
+                    end
+
+                    local function updateItemVisual()
+                        local checked = isChecked()
+                        indicator.BackgroundColor3 = checked and colors.accent or colors.control
+                    end
+
+                    updateItemVisual()
+
+                    item.Activated:Connect(function()
+                        runWithPluginIdentity(function()
+                            if isMultiSelect then
+                                local sel = getSelection() or {}
+                                sel[optKey] = not (sel[optKey] == true)
+                                setSelection(sel)
+                                updateItemVisual()
+                                refreshButtonDisplay()
+                            else
+                                setSelection(optKey)
+                                refreshButtonDisplay()
+                                closeActiveDropdown()
+                                overlayDismiss.Visible = false
+                            end
+                        end)
+                    end)
                 end
-                return
-            end
+            end)
 
-            if atStandby then
-                setPhase(PHASE.WaitDeposit, "waiting for claim")
-                setServerActionMode(false)
-                Movement.CancelMovement()
-                if Movement.EnsureLocomotion then
-                    Movement.EnsureLocomotion()
+            return row
+        end
+
+        -- Slider with Knob and Value Pill ("441M/s", "14B/s")
+        local function addSlider(parent, labelText, getValue, setValue, minVal, maxVal, stepVal, isValuePerSec)
+            local row, rightSlot = createRow(parent, labelText)
+
+            local sliderContainer = Instance.new("Frame")
+            sliderContainer.Size = UDim2.fromScale(1, 1)
+            sliderContainer.BackgroundTransparency = 1
+            sliderContainer.ZIndex = 6
+            sliderContainer.Parent = rightSlot
+
+            local valueBadge = Instance.new("Frame")
+            valueBadge.AnchorPoint = Vector2.new(1, 0.5)
+            valueBadge.Position = UDim2.new(1, 0, 0.5, 0)
+            valueBadge.Size = UDim2.fromOffset(66, 24)
+            valueBadge.BackgroundColor3 = colors.control
+            valueBadge.BorderSizePixel = 0
+            valueBadge.ZIndex = 7
+            valueBadge.Parent = sliderContainer
+            corner(valueBadge, 6)
+            stroke(valueBadge, colors.controlBorder, 1)
+
+            local valueText = text(valueBadge, "0", 10, colors.text, Enum.Font.GothamBold)
+            valueText.TextXAlignment = Enum.TextXAlignment.Center
+            valueText.ZIndex = 10
+
+            local trackWidth = 110
+            local track = Instance.new("TextButton")
+            track.AnchorPoint = Vector2.new(1, 0.5)
+            track.Position = UDim2.new(1, -74, 0.5, 0)
+            track.Size = UDim2.fromOffset(trackWidth, 6)
+            track.BackgroundColor3 = colors.toggleInactive
+            track.BorderSizePixel = 0
+            track.Text = ""
+            track.AutoButtonColor = false
+            track.ZIndex = 7
+            track.Parent = sliderContainer
+            corner(track, 3)
+
+            local fill = Instance.new("Frame")
+            fill.Size = UDim2.fromScale(0, 1)
+            fill.BackgroundColor3 = colors.knob
+            fill.BorderSizePixel = 0
+            fill.ZIndex = 8
+            fill.Parent = track
+            corner(fill, 3)
+
+            local knob = Instance.new("Frame")
+            knob.AnchorPoint = Vector2.new(0.5, 0.5)
+            knob.Position = UDim2.new(0, 0, 0.5, 0)
+            knob.Size = UDim2.fromOffset(14, 14)
+            knob.BackgroundColor3 = colors.knob
+            knob.BorderSizePixel = 0
+            knob.ZIndex = 9
+            knob.Parent = track
+            corner(knob, 7)
+
+            local function formatVal(v)
+                if isValuePerSec then
+                    return formatPerSec(v)
+                else
+                    return tostring(v)
                 end
-            else
-                setPhase(PHASE.ReturnStandby)
-                setServerActionMode(false)
-                moveDelivery(standbyPos)
             end
 
-            return
+            local function refreshVisual()
+                local val = math.clamp(getValue() or minVal, minVal, maxVal)
+                local frac = (val - minVal) / math.max(1, maxVal - minVal)
+                fill.Size = UDim2.fromScale(frac, 1)
+                knob.Position = UDim2.new(frac, 0, 0.5, 0)
+                valueText.Text = formatVal(val)
+            end
+
+            refreshVisual()
+
+            local dragging = false
+            local function updateDrag(posX)
+                local rel = math.clamp((posX - track.AbsolutePosition.X) / track.AbsoluteSize.X, 0, 1)
+                local raw = minVal + rel * (maxVal - minVal)
+                local stepped = math.floor((raw / stepVal) + 0.5) * stepVal
+                stepped = math.clamp(stepped, minVal, maxVal)
+                runWithPluginIdentity(function()
+                    setValue(stepped)
+                end)
+                fill.Size = UDim2.fromScale(rel, 1)
+                knob.Position = UDim2.new(rel, 0, 0.5, 0)
+                valueText.Text = formatVal(stepped)
+            end
+
+            track.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = true
+                    updateDrag(input.Position.X)
+                end
+            end)
+
+            UserInputService.InputChanged:Connect(function(input)
+                if dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+                    updateDrag(input.Position.X)
+                end
+            end)
+
+            UserInputService.InputEnded:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    dragging = false
+                end
+            end)
+
+            return row
         end
 
-        if shouldWaitForDay() then
-            state.wasDayBlocked = true
+        ---------------------------------------------------------------------
+        -- PAGE 1: STEAL (The Venyx Primary Interface shown in screenshot)
+        ---------------------------------------------------------------------
+        local stealPage = Instance.new("Frame")
+        stealPage.Name = "StealPage"
+        stealPage.Size = UDim2.fromScale(1, 1)
+        stealPage.BackgroundTransparency = 1
+        stealPage.Visible = true
+        stealPage.ZIndex = 3
+        stealPage.Parent = mainArea
+        pageFrames["Steal"] = stealPage
 
-            if handleNightWait(rootPart, standbyPos, atStandby) then
-                return
+        -- Header Bar inside Steal Page
+        local stealHeader = Instance.new("Frame")
+        stealHeader.Name = "StealHeader"
+        stealHeader.Size = UDim2.new(1, 0, 0, 64)
+        stealHeader.BackgroundTransparency = 1
+        stealHeader.ZIndex = 4
+        stealHeader.Parent = stealPage
+
+        local stealTitle = text(stealHeader, "Steal", 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(120, 26))
+        stealTitle.ZIndex = 10
+
+        local autoStealSubLabel = text(stealHeader, "AUTO STEAL", 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(120, 16))
+        autoStealSubLabel.ZIndex = 10
+
+        -- Sub-Tabs: "Auto Steal" & "Egg Predictor" on top right
+        local subTabsBar = Instance.new("Frame")
+        subTabsBar.AnchorPoint = Vector2.new(1, 0.5)
+        subTabsBar.Position = UDim2.new(1, -20, 0.5, 0)
+        subTabsBar.Size = UDim2.fromOffset(330, 32)
+        subTabsBar.BackgroundTransparency = 1
+        subTabsBar.ZIndex = 5
+        subTabsBar.Parent = stealHeader
+
+        local subTabsLayout = Instance.new("UIListLayout")
+        subTabsLayout.FillDirection = Enum.FillDirection.Horizontal
+        subTabsLayout.HorizontalAlignment = Enum.HorizontalAlignment.Right
+        subTabsLayout.Padding = UDim.new(0, 8)
+        subTabsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        subTabsLayout.Parent = subTabsBar
+
+        stealSubTabAutoStealBtn = Instance.new("TextButton")
+        stealSubTabAutoStealBtn.LayoutOrder = 1
+        stealSubTabAutoStealBtn.Size = UDim2.fromOffset(92, 30)
+        stealSubTabAutoStealBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+        stealSubTabAutoStealBtn.BorderSizePixel = 0
+        stealSubTabAutoStealBtn.Text = "Auto Steal"
+        stealSubTabAutoStealBtn.Font = Enum.Font.GothamBold
+        stealSubTabAutoStealBtn.TextSize = 11
+        stealSubTabAutoStealBtn.TextColor3 = colors.text
+        stealSubTabAutoStealBtn.AutoButtonColor = false
+        stealSubTabAutoStealBtn.ZIndex = 6
+        stealSubTabAutoStealBtn.Parent = subTabsBar
+        corner(stealSubTabAutoStealBtn, 8)
+        stroke(stealSubTabAutoStealBtn, Color3.fromRGB(50, 54, 72), 1)
+
+        stealSubTabPredictorBtn = Instance.new("TextButton")
+        stealSubTabPredictorBtn.LayoutOrder = 2
+        stealSubTabPredictorBtn.Size = UDim2.fromOffset(108, 30)
+        stealSubTabPredictorBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+        stealSubTabPredictorBtn.BorderSizePixel = 0
+        stealSubTabPredictorBtn.Text = "Egg Predictor"
+        stealSubTabPredictorBtn.Font = Enum.Font.GothamSemibold
+        stealSubTabPredictorBtn.TextSize = 11
+        stealSubTabPredictorBtn.TextColor3 = colors.muted
+        stealSubTabPredictorBtn.AutoButtonColor = false
+        stealSubTabPredictorBtn.ZIndex = 6
+        stealSubTabPredictorBtn.Parent = subTabsBar
+        corner(stealSubTabPredictorBtn, 8)
+
+        stealSubTabManualBtn = Instance.new("TextButton")
+        stealSubTabManualBtn.LayoutOrder = 3
+        stealSubTabManualBtn.Size = UDim2.fromOffset(88, 30)
+        stealSubTabManualBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+        stealSubTabManualBtn.BorderSizePixel = 0
+        stealSubTabManualBtn.Text = "Manual Steal"
+        stealSubTabManualBtn.Font = Enum.Font.GothamSemibold
+        stealSubTabManualBtn.TextSize = 11
+        stealSubTabManualBtn.TextColor3 = colors.muted
+        stealSubTabManualBtn.AutoButtonColor = false
+        stealSubTabManualBtn.ZIndex = 6
+        stealSubTabManualBtn.Parent = subTabsBar
+        corner(stealSubTabManualBtn, 8)
+
+        -- Scrollable Body Container for Steal
+        local stealScroll = Instance.new("ScrollingFrame")
+        stealScroll.Position = UDim2.fromOffset(20, 64)
+        stealScroll.Size = UDim2.new(1, -40, 1, -74)
+        stealScroll.BackgroundTransparency = 1
+        stealScroll.BorderSizePixel = 0
+        stealScroll.ScrollBarThickness = 4
+        stealScroll.ScrollBarImageColor3 = colors.accent
+        stealScroll.CanvasSize = UDim2.fromOffset(0, 0)
+        stealScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        stealScroll.ZIndex = 4
+        stealScroll.Parent = stealPage
+
+        -- Sub-page 1: Two-Column Auto Steal View (The Screenshot Interface)
+        stealSubPageAutoSteal = Instance.new("Frame")
+        stealSubPageAutoSteal.Size = UDim2.new(1, 0, 0, 0)
+        stealSubPageAutoSteal.AutomaticSize = Enum.AutomaticSize.Y
+        stealSubPageAutoSteal.BackgroundTransparency = 1
+        stealSubPageAutoSteal.Visible = true
+        stealSubPageAutoSteal.ZIndex = 4
+        stealSubPageAutoSteal.Parent = stealScroll
+
+        local stealColumnsLayout = Instance.new("UIListLayout")
+        stealColumnsLayout.FillDirection = Enum.FillDirection.Horizontal
+        stealColumnsLayout.Padding = UDim.new(0, 16)
+        stealColumnsLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        stealColumnsLayout.Parent = stealSubPageAutoSteal
+
+        -- LEFT COLUMN (Auto Steal Controls + Auto Hop Server)
+        local leftCol = Instance.new("Frame")
+        leftCol.LayoutOrder = 1
+        leftCol.Size = UDim2.new(0.5, -8, 0, 0)
+        leftCol.AutomaticSize = Enum.AutomaticSize.Y
+        leftCol.BackgroundTransparency = 1
+        leftCol.ZIndex = 4
+        leftCol.Parent = stealSubPageAutoSteal
+
+        local leftColLayout = Instance.new("UIListLayout")
+        leftColLayout.Padding = UDim.new(0, 12)
+        leftColLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        leftColLayout.Parent = leftCol
+
+        -- Card 1: ⚡ AUTO STEAL
+        local autoStealCard, autoStealBody = createCard(leftCol, "AUTO STEAL", "⚡", false)
+
+        -- Row 1: Auto steal
+        addToggle(autoStealBody, "Auto steal", function()
+            return runtime.autoFarmEnabled == true
+        end, function(v)
+            runtime.autoFarmEnabled = v
+            if v and callbacks.onAutoFarmStart then
+                callbacks.onAutoFarmStart()
+            elseif not v and callbacks.onAutoFarmStop then
+                callbacks.onAutoFarmStop()
             end
-        else
-            if state.wasDayBlocked then
-                triggerRushFarmAfterDay()
+        end)
 
-                if state.phase == PHASE.WaitForDay or state.phase == PHASE.ReturnStandby then
-                    setPhase(PHASE.Standby, "eggs dropped")
+        -- Row 2: Move to egg
+        addDropdown(autoStealBody, "Move to egg", {"Teleport", "Walk", "Fast Tween"}, false, function()
+            return runtime.moveToEggMethod or "Teleport"
+        end, function(v)
+            runtime.moveToEggMethod = v
+        end)
+
+        -- Row 3: Delivery method
+        addDropdown(autoStealBody, "Delivery method", {"Quick steps", "Fast Tween", "Walk"}, false, function()
+            return runtime.deliveryMethod or "Quick steps"
+        end, function(v)
+            runtime.deliveryMethod = v
+        end)
+
+        -- Row 4: Teleport zones (Multi-select)
+        local availableZones = {
+            "Cherry Blossom", "Alien", "Volcano", "Titan Temple", "Light Dark", "Enchanted Forest"
+        }
+        addDropdown(autoStealBody, "Teleport zones", availableZones, true, function()
+            return runtime.teleportZones or {}
+        end, function(v)
+            runtime.teleportZones = v
+        end)
+
+        -- Row 5: Steal missing index eggs
+        addToggle(autoStealBody, "Steal missing index eggs", function()
+            return runtime.stealMissingIndexEggs == true
+        end, function(v)
+            runtime.stealMissingIndexEggs = v
+        end)
+
+        -- Row 6: Steal from other players
+        addToggle(autoStealBody, "Steal from other players", function()
+            return runtime.stealFromPlayers == true
+        end, function(v)
+            runtime.stealFromPlayers = v
+        end)
+
+        -- Row 7: Anti guard
+        addToggle(autoStealBody, "Anti guard", function()
+            return runtime.guardZoneForceWalk == true
+        end, function(v)
+            runtime.guardZoneForceWalk = v
+            if PathService then PathService.Invalidate() end
+        end)
+
+        -- Row 8: Drop eggs at safe zone
+        addToggle(autoStealBody, "Drop eggs at safe zone", function()
+            return runtime.dropEggsAtSafeZone == true
+        end, function(v)
+            runtime.dropEggsAtSafeZone = v
+        end)
+
+        -- Card 2: ⊟ AUTO HOP SERVER (Collapsible, default collapsed)
+        local autoHopCard, autoHopBody = createCard(leftCol, "AUTO HOP SERVER", "⊟", true)
+
+        addToggle(autoHopBody, "Enable Auto Hop", function()
+            return runtime.autoHopEnabled == true
+        end, function(v)
+            runtime.autoHopEnabled = v
+        end)
+
+        addSlider(autoHopBody, "Hop Delay", function()
+            return runtime.autoHopDelay or 30
+        end, function(v)
+            runtime.autoHopDelay = v
+        end, 5, 300, 5, false)
+
+        addDropdown(autoHopBody, "Hop Mode", {"Lowest Player Count", "Same Region", "Random Server"}, false, function()
+            return runtime.autoHopMode or "Lowest Player Count"
+        end, function(v)
+            runtime.autoHopMode = v
+        end)
+
+        -- RIGHT COLUMN (Filter Controls + Min Value Per Rarity)
+        local rightCol = Instance.new("Frame")
+        rightCol.LayoutOrder = 2
+        rightCol.Size = UDim2.new(0.5, -8, 0, 0)
+        rightCol.AutomaticSize = Enum.AutomaticSize.Y
+        rightCol.BackgroundTransparency = 1
+        rightCol.ZIndex = 4
+        rightCol.Parent = stealSubPageAutoSteal
+
+        local rightColLayout = Instance.new("UIListLayout")
+        rightColLayout.Padding = UDim.new(0, 12)
+        rightColLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        rightColLayout.Parent = rightCol
+
+        -- Card 3: 🎯 FILTER
+        local filterCard, filterBody = createCard(rightCol, "FILTER", "🎯", false)
+
+        -- Row 1: Zones (Multi-select)
+        local zoneOptions = {
+            "Alien", "Cherry Blossom", "Volcano", "Titan Temple", "Light Dark", "Enchanted Forest"
+        }
+        if FarmFilters and FarmFilters.GetZoneOptions then
+            local dynamicZones = FarmFilters.GetZoneOptions()
+            if #dynamicZones > 0 then
+                zoneOptions = {}
+                for _, z in ipairs(dynamicZones) do
+                    table.insert(zoneOptions, { id = z.id, label = z.label })
                 end
             end
-
-            state.wasDayBlocked = false
         end
 
-        if InventoryManager and InventoryManager.ShouldFeedParasite and InventoryManager.ShouldFeedParasite() then
-            if not InventoryManager.IsActive() then
-                InventoryManager.StartFeedParasite()
+        addDropdown(filterBody, "Zones", zoneOptions, true, function()
+            return runtime.uiZoneSelection or {}
+        end, function(v)
+            runtime.uiZoneSelection = v
+            if FarmFilters and FarmFilters.SetZoneEnabled then
+                for _, z in ipairs(zoneOptions) do
+                    local zId = type(z) == "table" and z.id or z
+                    if v[zId] ~= nil then
+                        FarmFilters.SetZoneEnabled(zId, v[zId] == true)
+                    end
+                end
+            end
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 2: Steal first
+        addDropdown(filterBody, "Steal first", {
+            "Best value", "Lowest value", "Best rarity", "Best mutation", "Biggest", "Closest"
+        }, false, function()
+            return runtime.autoFarmPriority or "Best value"
+        end, function(v)
+            runtime.autoFarmPriority = v
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 3: Mutations (Multi-select)
+        addDropdown(filterBody, "Mutations", {
+            "None", "Silver", "Rainbow", "Golden", "Infested", "Mutant"
+        }, true, function()
+            return runtime.uiMutationSelection or {}
+        end, function(v)
+            runtime.uiMutationSelection = v
+            runtime.autoFarmMutantOnly = v.Mutant == true
+            runtime.autoFarmInfestedOnly = v.Infested == true
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 4: Rarities (Multi-select)
+        local rarityOptions = {
+            "Divine", "Eternal", "Secret", "Cosmic", "Mythic", "Legendary", "Epic", "Rare", "Uncommon", "Common"
+        }
+        if FarmFilters and FarmFilters.GetRarityOptions then
+            local dynamicRarities = FarmFilters.GetRarityOptions()
+            if #dynamicRarities > 0 then
+                rarityOptions = {}
+                for _, r in ipairs(dynamicRarities) do
+                    table.insert(rarityOptions, { id = r.key, label = r.label })
+                end
+            end
+        end
+
+        addDropdown(filterBody, "Rarities", rarityOptions, true, function()
+            return runtime.uiRaritySelection or {}
+        end, function(v)
+            runtime.uiRaritySelection = v
+            if FarmFilters and FarmFilters.SetRarityEnabled then
+                for _, r in ipairs(rarityOptions) do
+                    local rKey = type(r) == "table" and r.id or r
+                    if v[rKey] ~= nil then
+                        FarmFilters.SetRarityEnabled(rKey, v[rKey] == true)
+                    end
+                end
+            end
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 5: Only these eggs (Multi-select)
+        local commonEggNames = {
+            "ArchAngel", "Void Pearl", "Golden Goose", "Dragon Egg", "Cosmic Egg", "Phoenix Egg", "Titan Egg", "Gorilla King"
+        }
+        addDropdown(filterBody, "Only these eggs", commonEggNames, true, function()
+            return runtime.whitelistEggNames or {}
+        end, function(v)
+            runtime.whitelistEggNames = v
+            if EggData and EggData.InvalidateCache then EggData.InvalidateCache() end
+        end)
+
+        -- Row 6: Min value /s
+        addSlider(filterBody, "Min value /s", function()
+            return runtime.autoFarmMinValuePerSec or 441000000
+        end, function(v)
+            runtime.autoFarmMinValuePerSec = v
+        end, 0, 1000000000, 10000000, true)
+
+        -- Row 7: Sell cheapest egg when bag is full
+        addToggle(filterBody, "Sell cheapest egg when bag is full", function()
+            return runtime.autoDumpWorstEggsEnabled ~= false
+        end, function(v)
+            runtime.autoDumpWorstEggsEnabled = v
+            runtime.autoSellEnabled = v
+        end)
+
+        -- Row 8: Only below /s
+        addSlider(filterBody, "Only below /s", function()
+            return runtime.autoFarmMaxValuePerSec or 14000000000
+        end, function(v)
+            runtime.autoFarmMaxValuePerSec = v
+        end, 1000000000, 50000000000, 1000000000, true)
+
+        -- Card 4: ☆ MIN VALUE PER RARITY (Collapsible, default collapsed)
+        local minValCard, minValBody = createCard(rightCol, "MIN VALUE PER RARITY", "☆", true)
+
+        if runtime.minValPerRarity == nil then runtime.minValPerRarity = {} end
+
+        local rarityList = { "Common", "Rare", "Epic", "Legendary", "Mythic", "Cosmic", "Divine" }
+        for _, rName in ipairs(rarityList) do
+            addSlider(minValBody, rName .. " Min", function()
+                return runtime.minValPerRarity[rName] or 0
+            end, function(v)
+                runtime.minValPerRarity[rName] = v
+            end, 0, 1000000000, 10000000, true)
+        end
+
+        -- Sub-page 2: Egg Predictor View
+        stealSubPagePredictor = Instance.new("Frame")
+        stealSubPagePredictor.Size = UDim2.new(1, 0, 0, 0)
+        stealSubPagePredictor.AutomaticSize = Enum.AutomaticSize.Y
+        stealSubPagePredictor.BackgroundTransparency = 1
+        stealSubPagePredictor.Visible = false
+        stealSubPagePredictor.ZIndex = 4
+        stealSubPagePredictor.Parent = stealScroll
+
+        local predCard, predBody = createCard(stealSubPagePredictor, "EGG PREDICTOR", "🔮", false)
+        local predStatusLabel = text(predBody, "Scanning field egg cycles and probability...", 12, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 30))
+        predStatusLabel.ZIndex = 10
+
+        local predTableContainer = Instance.new("Frame")
+        predTableContainer.Size = UDim2.new(1, 0, 0, 220)
+        predTableContainer.BackgroundColor3 = colors.card
+        predTableContainer.BorderSizePixel = 0
+        predTableContainer.ZIndex = 5
+        predTableContainer.Parent = predBody
+        corner(predTableContainer, 8)
+        stroke(predTableContainer, colors.cardBorder, 1)
+
+        local predHeaderRow = Instance.new("Frame")
+        predHeaderRow.Size = UDim2.new(1, 0, 0, 32)
+        predHeaderRow.BackgroundColor3 = colors.control
+        predHeaderRow.BorderSizePixel = 0
+        predHeaderRow.ZIndex = 6
+        predHeaderRow.Parent = predTableContainer
+        corner(predHeaderRow, 8)
+
+        local th1 = text(predHeaderRow, "Zone", 11, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
+        th1.ZIndex = 10
+        local th2 = text(predHeaderRow, "Next Egg", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
+        th2.ZIndex = 10
+        local th3 = text(predHeaderRow, "Rarity / Value", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
+        th3.ZIndex = 10
+        local th4 = text(predHeaderRow, "Timer", 11, colors.muted, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+        th4.ZIndex = 10
+
+        local predList = Instance.new("ScrollingFrame")
+        predList.Position = UDim2.fromOffset(0, 34)
+        predList.Size = UDim2.new(1, 0, 1, -34)
+        predList.BackgroundTransparency = 1
+        predList.BorderSizePixel = 0
+        predList.ScrollBarThickness = 3
+        predList.ZIndex = 6
+        predList.Parent = predTableContainer
+
+        local predListLayout = Instance.new("UIListLayout")
+        predListLayout.Padding = UDim.new(0, 2)
+        predListLayout.Parent = predList
+
+        local mockSpawns = {
+            { zone = "Alien", egg = "Void Pearl", rarity = "Secret (14.2B/s)", timer = "00:42" },
+            { zone = "Cherry Blossom", egg = "ArchAngel", rarity = "Divine (28.5B/s)", timer = "01:15" },
+            { zone = "Volcano", egg = "Molten Titan", rarity = "Cosmic (8.1B/s)", timer = "02:08" },
+            { zone = "Titan Temple", egg = "Gorilla King", rarity = "Mythic (3.2B/s)", timer = "02:50" },
+            { zone = "Light Dark", egg = "Eclipse Core", rarity = "Divine (32.0B/s)", timer = "03:30" },
+        }
+
+        for _, item in ipairs(mockSpawns) do
+            local row = Instance.new("Frame")
+            row.Size = UDim2.new(1, 0, 0, 28)
+            row.BackgroundTransparency = 1
+            row.ZIndex = 7
+            row.Parent = predList
+
+            local c1 = text(row, item.zone, 11, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(16, 0), UDim2.new(0.3, 0, 1, 0))
+            c1.ZIndex = 10
+            local c2 = text(row, item.egg, 11, colors.accentGlow, Enum.Font.GothamSemibold, UDim2.new(0.3, 0, 0, 0), UDim2.new(0.3, 0, 1, 0))
+            c2.ZIndex = 10
+            local c3 = text(row, item.rarity, 11, colors.muted, Enum.Font.GothamMedium, UDim2.new(0.6, 0, 0, 0), UDim2.new(0.25, 0, 1, 0))
+            c3.ZIndex = 10
+            local c4 = text(row, item.timer, 11, colors.green, Enum.Font.GothamBold, UDim2.new(0.85, 0, 0, 0), UDim2.new(0.15, 0, 1, 0))
+            c4.ZIndex = 10
+        end
+
+        -- Sub-page 3: Manual Steal (current-server eggs only)
+        stealSubPageManual = Instance.new("Frame")
+        stealSubPageManual.Size = UDim2.new(1, 0, 0, 0)
+        stealSubPageManual.AutomaticSize = Enum.AutomaticSize.Y
+        stealSubPageManual.BackgroundTransparency = 1
+        stealSubPageManual.Visible = false
+        stealSubPageManual.ZIndex = 4
+        stealSubPageManual.Parent = stealScroll
+
+        local manualCard, manualBody = createCard(stealSubPageManual, "MANUAL STEAL", "✋", false)
+        local manualStatus = text(manualBody, "Ready. Refresh to list eggs in this server.", 12, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 28))
+        manualStatus.ZIndex = 10
+
+        local selectedEggLabel = text(manualBody, "Selected: none", 12, colors.text, Enum.Font.GothamSemibold, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 26))
+        selectedEggLabel.ZIndex = 10
+
+        local manualList = Instance.new("ScrollingFrame")
+        manualList.Size = UDim2.new(1, 0, 0, 230)
+        manualList.BackgroundColor3 = colors.card
+        manualList.BorderSizePixel = 0
+        manualList.ScrollBarThickness = 4
+        manualList.ScrollBarImageColor3 = colors.accent
+        manualList.CanvasSize = UDim2.fromOffset(0, 0)
+        manualList.AutomaticCanvasSize = Enum.AutomaticSize.Y
+        manualList.ZIndex = 6
+        manualList.Parent = manualBody
+        corner(manualList, 8)
+        stroke(manualList, colors.cardBorder, 1)
+
+        local manualListLayout = Instance.new("UIListLayout")
+        manualListLayout.Padding = UDim.new(0, 4)
+        manualListLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        manualListLayout.Parent = manualList
+        local manualListPadding = Instance.new("UIPadding")
+        manualListPadding.PaddingTop = UDim.new(0, 6)
+        manualListPadding.PaddingBottom = UDim.new(0, 6)
+        manualListPadding.PaddingLeft = UDim.new(0, 6)
+        manualListPadding.PaddingRight = UDim.new(0, 6)
+        manualListPadding.Parent = manualList
+
+        local selectedManualEgg
+        local manualBusy = false
+        local manualCancelRequested = false
+        local manualRows = {}
+
+        local function setManualStatus(message, color)
+            manualStatus.Text = tostring(message)
+            manualStatus.TextColor3 = color or colors.muted
+        end
+
+        local function clearManualRows()
+            for _, child in ipairs(manualList:GetChildren()) do
+                if child:IsA("TextButton") then child:Destroy() end
+            end
+            table.clear(manualRows)
+        end
+
+        local function getEggLabel(egg)
+            local info = egg.info or {}
+            local name = tostring(info.name or egg.uid or "Unknown egg")
+            local rarity = tostring(info.rarityName or "Unknown rarity")
+            local area = tostring(egg.areaName or egg.areaId or "Unknown area")
+            return string.format("%s  |  %s  |  %s", name, rarity, area)
+        end
+
+        local function refreshManualEggs()
+            if manualBusy then
+                setManualStatus("Cancel the active operation before refreshing.", colors.star)
+                return
+            end
+            if not EggData or type(EggData.CollectAll) ~= "function" then
+                setManualStatus("EggData.CollectAll is unavailable.", colors.red)
+                return
+            end
+            local ok, eggs = pcall(function() return EggData.CollectAll(true) end)
+            if not ok or type(eggs) ~= "table" then
+                setManualStatus("Failed to read current-server eggs: " .. tostring(eggs), colors.red)
+                return
+            end
+            clearManualRows()
+            selectedManualEgg = nil
+            selectedEggLabel.Text = "Selected: none"
+            for index, egg in ipairs(eggs) do
+                local row = Instance.new("TextButton")
+                row.Name = "ManualEgg_" .. tostring(index)
+                row.Size = UDim2.new(1, -4, 0, 34)
+                row.BackgroundColor3 = colors.control
+                row.BorderSizePixel = 0
+                row.Text = ""
+                row.AutoButtonColor = false
+                row.ZIndex = 7
+                row.Parent = manualList
+                corner(row, 6)
+                local rowText = text(row, getEggLabel(egg), 10, colors.text, Enum.Font.GothamMedium, UDim2.fromOffset(10, 0), UDim2.new(1, -18, 1, 0))
+                rowText.ZIndex = 10
+                rowText.TextTruncate = Enum.TextTruncate.AtEnd
+                row.Activated:Connect(function()
+                    if manualBusy then return end
+                    selectedManualEgg = { uid = egg.uid, label = getEggLabel(egg) }
+                    selectedEggLabel.Text = "Selected: " .. selectedManualEgg.label
+                    for _, item in ipairs(manualList:GetChildren()) do
+                        if item:IsA("TextButton") then
+                            item.BackgroundColor3 = item == row and Color3.fromRGB(47, 51, 75) or colors.control
+                        end
+                    end
+                end)
+                table.insert(manualRows, row)
+            end
+            setManualStatus(string.format("Found %d egg(s) in this server.", #eggs), colors.green)
+        end
+
+        local function resolveManualSlotKey(record)
+            if record and AreaEggSlotIdentity and AreaEggSlotIdentity.LooksLikeFirstAreaUid(record.Uid) then
+                return AreaEggSlotIdentity.SlotKey(record.AreaId, record.NestId)
+            end
+            return nil
+        end
+
+        local manualActions = Instance.new("Frame")
+        manualActions.Size = UDim2.new(1, 0, 0, 38)
+        manualActions.BackgroundTransparency = 1
+        manualActions.ZIndex = 6
+        manualActions.Parent = manualBody
+        local actionLayout = Instance.new("UIListLayout")
+        actionLayout.FillDirection = Enum.FillDirection.Horizontal
+        actionLayout.Padding = UDim.new(0, 8)
+        actionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        actionLayout.Parent = manualActions
+
+        local function makeManualButton(name, label, width, order, color)
+            local button = Instance.new("TextButton")
+            button.Name = name
+            button.LayoutOrder = order
+            button.Size = UDim2.fromOffset(width, 34)
+            button.BackgroundColor3 = color
+            button.BorderSizePixel = 0
+            button.Text = label
+            button.Font = Enum.Font.GothamBold
+            button.TextSize = 11
+            button.TextColor3 = colors.text
+            button.AutoButtonColor = false
+            button.ZIndex = 7
+            button.Parent = manualActions
+            corner(button, 7)
+            return button
+        end
+
+        local refreshManualBtn = makeManualButton("RefreshManualEggs", "Refresh list", 112, 1, colors.control)
+        local startManualBtn = makeManualButton("StealSelectedEgg", "Steal Selected", 132, 2, colors.accent)
+        local cancelManualBtn = makeManualButton("CancelManualSteal", "Cancel", 82, 3, colors.red)
+
+        refreshManualBtn.Activated:Connect(function()
+            runWithPluginIdentity(refreshManualEggs)
+        end)
+
+        cancelManualBtn.Activated:Connect(function()
+            if not manualBusy then
+                setManualStatus("No active manual operation.")
+                return
+            end
+            manualCancelRequested = true
+            if Movement and Movement.CancelMovement then pcall(Movement.CancelMovement) end
+            setManualStatus("Cancellation requested...", colors.star)
+        end)
+
+        startManualBtn.Activated:Connect(function()
+            if manualBusy then return end
+            if not selectedManualEgg then
+                setManualStatus("Select an egg first.", colors.star)
+                return
+            end
+            if not EggState or type(EggState.CarryFieldEgg) ~= "function" then
+                setManualStatus("EggState.CarryFieldEgg is unavailable.", colors.red)
+                return
+            end
+            local status = AutoFarm and AutoFarm.GetStatus and AutoFarm.GetStatus() or nil
+            if status and status.isCarrying then
+                setManualStatus("Cannot start: your character is already carrying an egg.", colors.red)
+                return
+            end
+            if (status and status.enabled) or runtime.autoFarmEnabled == true then
+                if AutoFarm and AutoFarm.Stop then AutoFarm.Stop() end
+                runtime.autoFarmEnabled = false
+            end
+            if not Movement or not Movement.WalkTo or not Movement.SetServerActionMode then
+                setManualStatus("Movement walk API is unavailable.", colors.red)
+                return
             end
 
-            if InventoryManager.IsActive() then
-                if state.phase ~= PHASE.FeedParasite then
-                    setPhase(PHASE.FeedParasite, "feeding infested eggs")
+            manualBusy = true
+            manualCancelRequested = false
+            startManualBtn.Active = false
+            setManualStatus("Preparing to walk to selected egg...", colors.star)
+
+            task.spawn(function()
+                local function finish(message, color)
+                    manualBusy = false
+                    if Movement.CancelMovement then pcall(Movement.CancelMovement) end
+                    if Movement.SetServerActionMode then pcall(Movement.SetServerActionMode, false) end
+                    startManualBtn.Active = true
+                    setManualStatus(message, color)
                 end
 
-                InventoryManager.Tick()
-                return
-            end
-        elseif state.phase == PHASE.FeedParasite then
-            setPhase(PHASE.Standby, "infested fed")
-        end
-
-        if InventoryManager then
-            if InventoryManager.ShouldManage() then
-                if state.phase ~= PHASE.ManageInventory then
-                    setPhase(PHASE.ManageInventory, "inventory full")
-                    InventoryManager.Start()
+                local ok, err = pcall(function()
+                    Movement.SetServerActionMode(true)
+                    local deadline = os.clock() + 35
+                    local lastWalkUid
+                    while os.clock() < deadline do
+                        if manualCancelRequested then
+                            finish("Manual Steal cancelled. Auto Steal remains OFF.", colors.star)
+                            return
+                        end
+                        local egg = EggData.FindByUid and EggData.FindByUid(selectedManualEgg.uid, true)
+                        if not egg then
+                            finish("Selected egg is no longer available in this server.", colors.red)
+                            return
+                        end
+                        local character = LocalPlayer.Character
+                        local root = character and character:FindFirstChild("HumanoidRootPart")
+                        if not root then
+                            finish("Character root part is unavailable.", colors.red)
+                            return
+                        end
+                        if not egg.worldPos then
+                            finish("Selected egg has no valid world position.", colors.red)
+                            return
+                        end
+                        local distance = (root.Position - egg.worldPos).Magnitude
+                        if distance <= 8 then
+                            Movement.CancelMovement()
+                            task.wait(0.25)
+                            local current = EggData.FindByUid and EggData.FindByUid(selectedManualEgg.uid, true)
+                            if not current then
+                                finish("Egg disappeared before pickup.", colors.red)
+                                return
+                            end
+                            if not current.record or not current.record.Uid then
+                                finish("Egg record is incomplete; cannot request pickup.", colors.red)
+                                return
+                            end
+                            local slotKey = resolveManualSlotKey(current.record)
+                            local callOk, result, reason = pcall(function()
+                                return EggState.CarryFieldEgg(current.record.Uid, slotKey)
+                            end)
+                            if not callOk then
+                                finish("Pickup call error: " .. tostring(result), colors.red)
+                            elseif result == true then
+                                finish("Pickup request accepted by the game server.", colors.green)
+                            else
+                                finish("Pickup rejected: " .. tostring(reason or result or "server validation failed"), colors.red)
+                            end
+                            return
+                        end
+                        if lastWalkUid ~= egg.uid then
+                            lastWalkUid = egg.uid
+                            Movement.WalkTo(egg.worldPos, 16)
+                        end
+                        task.wait(0.2)
+                    end
+                    finish("Timed out while approaching the egg. Try refreshing the list.", colors.red)
+                end)
+                if not ok and manualBusy then
+                    finish("Manual Steal error: " .. tostring(err), colors.red)
                 end
+            end)
+        end)
 
-                InventoryManager.Tick()
-                return
-            end
+        refreshManualEggs()
 
-            if state.phase == PHASE.ManageInventory then
-                InventoryManager.Stop()
-                setPhase(PHASE.Standby, "inventory cleared")
+        -- Sub-tab switching between Auto Steal & Egg Predictor
+        stealSubTabAutoStealBtn.Activated:Connect(function()
+            currentStealSubTab = "AutoSteal"
+            stealSubTabAutoStealBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+            stealSubTabAutoStealBtn.TextColor3 = colors.text
+            local bStroke = stealSubTabAutoStealBtn:FindFirstChildOfClass("UIStroke")
+            if bStroke then bStroke.Transparency = 0 end
+
+            stealSubTabPredictorBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+            stealSubTabPredictorBtn.TextColor3 = colors.muted
+            local pStroke = stealSubTabPredictorBtn:FindFirstChildOfClass("UIStroke")
+            if pStroke then pStroke.Transparency = 1 end
+
+            stealSubTabManualBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+            stealSubTabManualBtn.TextColor3 = colors.muted
+            local mStroke = stealSubTabManualBtn:FindFirstChildOfClass("UIStroke")
+            if mStroke then mStroke.Transparency = 1 end
+            stealSubPageAutoSteal.Visible = true
+            stealSubPagePredictor.Visible = false
+            stealSubPageManual.Visible = false
+            autoStealSubLabel.Text = "AUTO STEAL"
+        end)
+
+        stealSubTabPredictorBtn.Activated:Connect(function()
+            currentStealSubTab = "EggPredictor"
+            stealSubTabPredictorBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+            stealSubTabPredictorBtn.TextColor3 = colors.text
+            local pStroke = stealSubTabPredictorBtn:FindFirstChildOfClass("UIStroke")
+            if not pStroke then pStroke = stroke(stealSubTabPredictorBtn, Color3.fromRGB(50, 54, 72), 1) end
+            pStroke.Transparency = 0
+
+            stealSubTabAutoStealBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+            stealSubTabAutoStealBtn.TextColor3 = colors.muted
+            local bStroke = stealSubTabAutoStealBtn:FindFirstChildOfClass("UIStroke")
+            if bStroke then bStroke.Transparency = 1 end
+
+            stealSubTabManualBtn.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+            stealSubTabManualBtn.TextColor3 = colors.muted
+            local mStroke = stealSubTabManualBtn:FindFirstChildOfClass("UIStroke")
+            if mStroke then mStroke.Transparency = 1 end
+            stealSubPageAutoSteal.Visible = false
+            stealSubPagePredictor.Visible = true
+            stealSubPageManual.Visible = false
+            autoStealSubLabel.Text = "EGG PREDICTOR"
+        end)
+
+        stealSubTabManualBtn.Activated:Connect(function()
+            currentStealSubTab = "ManualSteal"
+            stealSubTabManualBtn.BackgroundColor3 = Color3.fromRGB(28, 31, 42)
+            stealSubTabManualBtn.TextColor3 = colors.text
+            local mStroke = stealSubTabManualBtn:FindFirstChildOfClass("UIStroke")
+            if not mStroke then mStroke = stroke(stealSubTabManualBtn, Color3.fromRGB(50, 54, 72), 1) end
+            mStroke.Transparency = 0
+            for _, button in ipairs({stealSubTabAutoStealBtn, stealSubTabPredictorBtn}) do
+                button.BackgroundColor3 = Color3.fromRGB(18, 19, 25)
+                button.TextColor3 = colors.muted
+                local buttonStroke = button:FindFirstChildOfClass("UIStroke")
+                if buttonStroke then buttonStroke.Transparency = 1 end
             end
+            stealSubPageAutoSteal.Visible = false
+            stealSubPagePredictor.Visible = false
+            stealSubPageManual.Visible = true
+            autoStealSubLabel.Text = "MANUAL STEAL"
+        end)
+
+        ---------------------------------------------------------------------
+        -- OTHER SIDEBAR PAGES (Home, Pets, Visuals, Player, Settings)
+        ---------------------------------------------------------------------
+
+        local function createGenericPage(pageId, pageTitleText, subtitleText)
+            local page = Instance.new("Frame")
+            page.Name = pageId .. "Page"
+            page.Size = UDim2.fromScale(1, 1)
+            page.BackgroundTransparency = 1
+            page.Visible = false
+            page.ZIndex = 3
+            page.Parent = mainArea
+            pageFrames[pageId] = page
+
+            local pHeader = Instance.new("Frame")
+            pHeader.Size = UDim2.new(1, 0, 0, 64)
+            pHeader.BackgroundTransparency = 1
+            pHeader.ZIndex = 4
+            pHeader.Parent = page
+
+            local pTitle = text(pHeader, pageTitleText, 22, colors.text, Enum.Font.GothamBold, UDim2.fromOffset(20, 10), UDim2.fromOffset(200, 26))
+            pTitle.ZIndex = 10
+            local pSub = text(pHeader, subtitleText or pageTitleText:upper(), 10, colors.muted, Enum.Font.GothamBold, UDim2.fromOffset(20, 38), UDim2.fromOffset(200, 16))
+            pSub.ZIndex = 10
+
+            local pScroll = Instance.new("ScrollingFrame")
+            pScroll.Position = UDim2.fromOffset(20, 64)
+            pScroll.Size = UDim2.new(1, -40, 1, -74)
+            pScroll.BackgroundTransparency = 1
+            pScroll.BorderSizePixel = 0
+            pScroll.ScrollBarThickness = 4
+            pScroll.ScrollBarImageColor3 = colors.accent
+            pScroll.CanvasSize = UDim2.fromOffset(0, 0)
+            pScroll.AutomaticCanvasSize = Enum.AutomaticSize.Y
+            pScroll.ZIndex = 4
+            pScroll.Parent = page
+
+            local pLayout = Instance.new("UIListLayout")
+            pLayout.Padding = UDim.new(0, 14)
+            pLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            pLayout.Parent = pScroll
+
+            return page, pScroll
         end
 
-        if state.phase == PHASE.WaitDeposit then
-            if atStandby then
-                if shouldAutoPlaceDuringFarm()
-                    and InventoryManager.StartBackgroundPlace
-                    and InventoryManager.StartBackgroundPlace("between runs") then
-                    setPhase(PHASE.Standby, "placing eggs")
-                    return
+        -- PAGE: HOME
+        local _, homeScroll = createGenericPage("Home", "Dashboard", "OVERVIEW & LIVE STATUS")
+        local homeCard1, homeBody1 = createCard(homeScroll, "QUICK CONTROLS", "⚡", false)
+        addToggle(homeBody1, "Auto Steal Active", function() return runtime.autoFarmEnabled == true end, function(v)
+            runtime.autoFarmEnabled = v
+            if v and callbacks.onAutoFarmStart then callbacks.onAutoFarmStart()
+            elseif not v and callbacks.onAutoFarmStop then callbacks.onAutoFarmStop() end
+        end)
+        addToggle(homeBody1, "Wait For Day Cycle", function() return runtime.waitForDayBeforeFarm ~= false end, function(v)
+            runtime.waitForDayBeforeFarm = v
+        end)
+
+        local homeCard2, homeBody2 = createCard(homeScroll, "SESSION TELEMETRY", "📊", false)
+        local telemetryText = text(homeBody2, "Loading telemetry stats...", 11, colors.muted, Enum.Font.GothamMedium, UDim2.fromOffset(0, 0), UDim2.new(1, 0, 0, 48))
+        telemetryText.TextWrapped = true
+        telemetryText.ZIndex = 10
+
+        -- PAGE: PET (✿)
+        local _, petScroll = createGenericPage("Pet", "Pet Automation", "PETS & BASE PEN")
+        local petCard, petBody = createCard(petScroll, "PET CARE", "🌱", false)
+        addToggle(petBody, "Auto Pet Care", function() return runtime.autoPetCareEnabled ~= false end, function(v) runtime.autoPetCareEnabled = v end)
+        addToggle(petBody, "Auto Hatch", function() return runtime.autoHatchEnabled ~= false end, function(v) runtime.autoHatchEnabled = v end)
+        addToggle(petBody, "Auto Equip Best Pets", function() return runtime.autoEquipBest ~= false end, function(v) runtime.autoEquipBest = v end)
+        addToggle(petBody, "Auto Fuse Duplicates", function() return runtime.autoFuseEnabled ~= false end, function(v) runtime.autoFuseEnabled = v end)
+
+        local penCard, penBody = createCard(petScroll, "BASE PEN", "🏰", false)
+        addToggle(penBody, "Auto Upgrade Base Pen", function() return runtime.autoUpgradeBasePen ~= false end, function(v) runtime.autoUpgradeBasePen = v end)
+        addToggle(penBody, "Auto Collect Pen Money", function() return runtime.autoCollectPenMoney ~= false end, function(v) runtime.autoCollectPenMoney = v end)
+
+        -- PAGE: ESP (✦)
+        local _, espScroll = createGenericPage("ESP", "Visuals & ESP", "FIELD DISPLAY SETTINGS")
+        local espCard, espBody = createCard(espScroll, "ESP TOGGLES", "✨", false)
+        addToggle(espBody, "Egg ESP", function() return runtime.showEggs ~= false end, function(v) runtime.showEggs = v end)
+        addToggle(espBody, "Treadmill ESP", function() return runtime.showTreadmill == true end, function(v) runtime.showTreadmill = v end)
+        addToggle(espBody, "Trap ESP", function() return runtime.showTraps == true end, function(v) runtime.showTraps = v end)
+        addToggle(espBody, "Avoid Own Traps", function() return runtime.pathAvoidOwnTraps == true end, function(v)
+            runtime.pathAvoidOwnTraps = v
+            if PathService then PathService.Invalidate() end
+        end)
+        addSlider(espBody, "Max ESP Distance", function() return runtime.maxDistance or 200 end, function(v) runtime.maxDistance = v end, 50, 800, 25, false)
+
+        -- PAGE: PLAYER (♟)
+        local _, playerScroll = createGenericPage("Player", "Player Character", "MOVEMENT & STANDBY")
+        local playerCard, playerBody = createCard(playerScroll, "STANDBY POSITION", "📍", false)
+
+        local standbyRow, standbySlot = createRow(playerBody, "Current Standby")
+        local standbyBtn = Instance.new("TextButton")
+        standbyBtn.AnchorPoint = Vector2.new(1, 0.5)
+        standbyBtn.Position = UDim2.new(1, 0, 0.5, 0)
+        standbyBtn.Size = UDim2.fromOffset(140, 26)
+        standbyBtn.BackgroundColor3 = colors.accent
+        standbyBtn.BorderSizePixel = 0
+        standbyBtn.Text = "Set Standby Here"
+        standbyBtn.Font = Enum.Font.GothamBold
+        standbyBtn.TextSize = 11
+        standbyBtn.TextColor3 = colors.text
+        standbyBtn.AutoButtonColor = false
+        standbyBtn.ZIndex = 8
+        standbyBtn.Parent = standbySlot
+        corner(standbyBtn, 6)
+
+        standbyBtn.Activated:Connect(function()
+            local char = LocalPlayer.Character
+            local root = char and char:FindFirstChild("HumanoidRootPart")
+            if root then
+                runtime.standbyPosition = root.Position
+                if PathService then PathService.Invalidate() end
+                standbyBtn.Text = "Standby Updated!"
+                task.delay(1.5, function() standbyBtn.Text = "Set Standby Here" end)
+            end
+        end)
+
+        local moveCard, moveBody = createCard(playerScroll, "MOVEMENT TWEAKS", "⚡", false)
+        addSlider(moveBody, "Tween Speed", function() return runtime.tweenSpeed or 700 end, function(v) runtime.tweenSpeed = v end, 300, 1000, 50, false)
+        addToggle(moveBody, "Walk In Guard Zone", function() return runtime.guardZoneForceWalk == true end, function(v) runtime.guardZoneForceWalk = v end)
+
+        local resetRow, resetSlot = createRow(moveBody, "Cancel Motion")
+        local resetBtn = Instance.new("TextButton")
+        resetBtn.AnchorPoint = Vector2.new(1, 0.5)
+        resetBtn.Position = UDim2.new(1, 0, 0.5, 0)
+        resetBtn.Size = UDim2.fromOffset(140, 26)
+        resetBtn.BackgroundColor3 = colors.card
+        resetBtn.BorderSizePixel = 0
+        resetBtn.Text = "Reset Character Motion"
+        resetBtn.Font = Enum.Font.GothamSemibold
+        resetBtn.TextSize = 10
+        resetBtn.TextColor3 = colors.muted
+        resetBtn.AutoButtonColor = false
+        resetBtn.ZIndex = 8
+        resetBtn.Parent = resetSlot
+        corner(resetBtn, 6)
+        stroke(resetBtn, colors.cardBorder, 1)
+
+        resetBtn.Activated:Connect(function()
+            if Movement and Movement.Reset then Movement.Reset() end
+        end)
+
+        -- PAGE: SETTINGS (⚙)
+        local _, settingsScroll = createGenericPage("Settings", "Settings & Config", "PREFERENCES & KEYBINDS")
+        local setCard, setBody = createCard(settingsScroll, "DISPLAY & LOCALE", "⚙", false)
+        addDropdown(setBody, "Language", { "English", "Tiếng Việt" }, false, function()
+            return runtime.uiLanguage or "English"
+        end, function(v)
+            runtime.uiLanguage = v
+            langBtn.Text = "文A  " .. v
+        end)
+
+        local keyRow, keySlot = createRow(setBody, "Hub Toggle Key")
+        local keyBtn = Instance.new("TextButton")
+        keyBtn.AnchorPoint = Vector2.new(1, 0.5)
+        keyBtn.Position = UDim2.new(1, 0, 0.5, 0)
+        keyBtn.Size = UDim2.fromOffset(60, 26)
+        keyBtn.BackgroundColor3 = colors.control
+        keyBtn.BorderSizePixel = 0
+        keyBtn.Text = (runtime.hubToggleKey or Enum.KeyCode.G).Name
+        keyBtn.Font = Enum.Font.GothamBold
+        keyBtn.TextSize = 11
+        keyBtn.TextColor3 = colors.text
+        keyBtn.AutoButtonColor = false
+        keyBtn.ZIndex = 8
+        keyBtn.Parent = keySlot
+        corner(keyBtn, 6)
+        stroke(keyBtn, colors.controlBorder, 1)
+
+        local listeningForKey = false
+        keyBtn.Activated:Connect(function()
+            if listeningForKey then return end
+            listeningForKey = true
+            keyBtn.Text = "..."
+            local conn
+            conn = UserInputService.InputBegan:Connect(function(input)
+                if input.UserInputType == Enum.UserInputType.Keyboard then
+                    runtime.hubToggleKey = input.KeyCode
+                    keyBtn.Text = input.KeyCode.Name
+                    listeningForKey = false
+                    conn:Disconnect()
                 end
+            end)
+        end)
 
-                setServerActionMode(false)
-                setPhase(PHASE.Standby, "ready for next egg")
-            else
-                setServerActionMode(false)
-                followPath(standbyPos, runtime.standbyArriveRadius)
-            end
-
-            return
-        end
-
-        if state.phase == PHASE.Standby then
-            if state.requireStandbyOnStart and not atStandby and not atStandbyStart then
-                setPhase(PHASE.Standby, "going to start")
-                followPath(standbyPos, runtime.standbyArriveRadius)
-                return
-            end
-
-            if state.requireStandbyOnStart and (atStandby or atStandbyStart) then
-                state.requireStandbyOnStart = false
-                clearTargetPath()
-            end
-
-            if InventoryManager and InventoryManager.ShouldManage() then
-                setPhase(PHASE.ManageInventory, "inventory full")
-                InventoryManager.Start()
-                return
-            end
-
-            if shouldWaitForDay() then
-                handleNightWait(rootPart, standbyPos, atStandby)
-                return
-            end
-
-            if atStandby
-                and shouldAutoPlaceDuringFarm()
-                and InventoryManager.StartBackgroundPlace
-                and InventoryManager.StartBackgroundPlace("farm standby") then
-                setPhase(PHASE.Standby, "placing eggs")
-                return
-            end
-
-            if beginGoToEgg() then
-                -- fall through to GoToEgg handler in the same tick
-            elseif state.rushFarmAfterDay then
-                setPhase(PHASE.Standby, "waiting for spawn")
-                return
-            elseif not atStandby then
-                followPath(standbyPos, runtime.standbyArriveRadius)
-                return
-            else
-                setPhase(PHASE.Standby, "no eggs")
-                if Movement.EnsureLocomotion then
-                    Movement.EnsureLocomotion()
-                end
-                return
-            end
-        end
-
-        if state.phase == PHASE.GoToEgg or state.phase == PHASE.Pickup then
-            if InventoryManager and InventoryManager.ShouldManage() then
-                state.targetEgg = nil
-                setPhase(PHASE.ManageInventory, "inventory full")
-                InventoryManager.Start()
-                return
-            end
-
-            local egg = refreshTargetEgg(false)
-
-            if not egg then
-                setServerActionMode(false)
-                setPhase(PHASE.Standby, "target lost")
-                return
-            end
-
-            tickGoToEgg(rootPart, egg)
-            return
-        end
-
-        if state.phase == PHASE.ReturnStandby then
-            setServerActionMode(false)
-
-            if atStandby then
-                setPhase(PHASE.Standby, "home")
-                return
-            end
-
-            followPath(standbyPos, runtime.standbyArriveRadius)
-            return
-        end
-
-        setPhase(PHASE.Standby, "reset")
+        return window
     end
 
-    local function onCarryChanged(carryState)
-        state.isCarrying = carryState.IsCarrying == true
-        state.carryUid = carryState.Uid
-        state.lastProgressAt = os.clock()
+    -------------------------------------------------------------------------
+    -- STATUS REFRESH LOOP
+    -------------------------------------------------------------------------
+    local function formatLiveStatus()
+        if not Diagnostics then return "Caught Void Pearl x19" end
+        local ok, diag = pcall(Diagnostics.Collect)
+        if not ok or type(diag) ~= "table" then return "Caught Void Pearl x19" end
 
-        if state.isCarrying then
-            state.carryConfirmedAt = os.clock()
-            state.depositWaitSince = nil
-        else
-            local rootPart = Movement.GetRootPart()
-            local standbyPos = runtime.standbyPosition
-            local atStandby = rootPart and standbyPos
-                and isAtStandby(rootPart.Position, standbyPos)
-
-            local confirmedAt = state.carryConfirmedAt
-            local confirmedFor = confirmedAt and (os.clock() - confirmedAt) or 0
-
-            if not atStandby then
-                state.isCarrying = true
-                state.depositWaitSince = state.depositWaitSince or os.clock()
-                return
+        if diag.autoFarm then
+            if diag.autoFarm.isCarrying and diag.autoFarm.target then
+                return string.format("Carrying: %s", tostring(diag.autoFarm.target.name or "Egg"))
+            elseif diag.autoFarm.target then
+                return string.format("Target: %s (%dm)", tostring(diag.autoFarm.target.name or "Egg"), math.floor(diag.autoFarm.target.distance or 0))
+            elseif diag.autoFarm.phase and diag.autoFarm.phase ~= "Idle" then
+                return string.format("Phase: %s", tostring(diag.autoFarm.phase))
             end
+        end
 
-            state.isCarrying = false
-            state.carryUid = nil
-            state.carryConfirmedAt = nil
-            state.depositWaitSince = nil
-            state.targetEgg = nil
-            state.waypoints = nil
-            state.pathGoal = nil
-            state.pickupSettleTicks = 0
-            setServerActionMode(false)
+        local eggsCount = diag.esp and diag.esp.eggsVisible or 0
+        if eggsCount > 0 then
+            return string.format("Field Eggs: %d visible", eggsCount)
+        end
 
-            if state.enabled then
-                setPhase(PHASE.Standby, "deposit complete")
+        return "Caught Void Pearl x19"
+    end
+
+    local function startStatusLoop()
+        if statusRunning then return end
+        statusRunning = true
+        statusTask = task.spawn(function()
+            while statusRunning do
+                runWithPluginIdentity(function()
+                    if statusPillText and statusPillText.Parent then
+                        statusPillText.Text = formatLiveStatus()
+                    end
+                end)
+                task.wait(runtime.hubStatusRefreshInterval or 1.5)
+            end
+        end)
+    end
+
+    local function stopStatusLoop()
+        statusRunning = false
+    end
+
+    local function SetVisible(val)
+        runtime.hubVisible = val == true
+        visible = runtime.hubVisible
+        if window then
+            pcall(function() window.Visible = visible end)
+            if not visible then
+                closeActiveDropdown()
             end
         end
     end
 
-    local function onCharacterAdded()
-        if not state.enabled then
-            return
-        end
+    local function ToggleVisible()
+        SetVisible(not visible)
+        return visible
+    end
 
-        Movement.Reset()
-        setServerActionMode(false)
-        clearTargetPath()
-        state.targetEgg = nil
-        state.isCarrying = false
-        state.carryUid = nil
-        state.pickupSettleTicks = 0
-        state.pickupFailCount = 0
-        state.depositWaitSince = nil
-        state.carryConfirmedAt = nil
-        state.requireStandbyOnStart = true
-        state.standbyStartAt = os.clock()
-        state.lastProgressAt = os.clock()
-        state.lastProgressPos = nil
-        PathService.Invalidate()
-        setPhase(PHASE.Standby, "respawned")
+    local function attachKeybind()
+        if inputConnection then return end
+        inputConnection = UserInputService.InputBegan:Connect(function(input, processed)
+            if not processed and input.KeyCode == (runtime.hubToggleKey or Enum.KeyCode.G) then
+                ToggleVisible()
+            end
+        end)
     end
 
     local function start()
-        if state.enabled then
-            return getStatus()
-        end
-
-        state.enabled = true
-        state.targetEgg = nil
-        state.waypoints = nil
-        state.pathGoal = nil
-        state.waypointIndex = 1
-        state.lastTargetRefresh = 0
-        state.pickupFailCount = 0
-        state.pickupSettleTicks = 0
-        state.requireStandbyOnStart = false
-        state.farmStartedAt = os.clock()
-        state.standbyStartAt = os.clock()
-        state.wasDayBlocked = shouldWaitForDay()
-        state.rushFarmAfterDay = false
-        state.phaseEnteredAt = os.clock()
-        state.lastProgressAt = os.clock()
-        state.lastProgressPos = nil
-        state.depositWaitSince = nil
-        state.carryConfirmedAt = nil
-        setServerActionMode(false)
-        PathService.Invalidate()
-
-        if SpeedBypass then
-            if runtime.speedBypassOnAutoFarm then
-                SpeedBypass.Enable()
-            else
-                SpeedBypass.Disable()
-            end
-        end
-
-        Passthrough.Enable()
-
-        if InventoryManager and InventoryManager.NotifyFarmStarted then
-            InventoryManager.NotifyFarmStarted()
-        end
-
-        if not state.connection then
-            state.connection = EggState.CarryChanged:Connect(onCarryChanged)
-        end
-
-        if LocalPlayer and not state.characterConnection then
-            state.characterConnection = LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-        end
-
-        setPhase(PHASE.Standby, "started")
-
-        print("[EggESP Auto] Workflow:")
-        print("  1. Standby at home position")
-        print("  2. Pick rarest allowed field egg (rarity filters apply)")
-        print("  3. Carry egg back to standby")
-        print("  4. Wait for auto deposit/claim")
-        print("  5. Repeat from step 1")
-        print("  Night reset: wait at standby until day")
-
-        return getStatus()
+        runWithPluginIdentity(function()
+            makeWindow()
+            attachKeybind()
+            SetVisible(runtime.hubVisible ~= false)
+        end)
+        startStatusLoop()
     end
 
     local function stop()
-        state.enabled = false
-        state.targetEgg = nil
-        state.waypoints = nil
-        state.pathGoal = nil
-        Movement.Reset()
-        Passthrough.Disable()
-
-        if SpeedBypass and runtime.speedBypassOnAutoFarm then
-            SpeedBypass.Disable()
-        end
-
-        if InventoryManager then
-            InventoryManager.Stop()
-        end
-
-        setPhase(PHASE.Idle, "stopped")
-
-        return getStatus()
+        stopStatusLoop()
+        SetVisible(false)
     end
 
     local function destroy()
-        stop()
-
-        if state.connection then
-            state.connection:Disconnect()
-            state.connection = nil
+        stopStatusLoop()
+        if inputConnection then
+            inputConnection:Disconnect()
+            inputConnection = nil
         end
-
-        if state.characterConnection then
-            state.characterConnection:Disconnect()
-            state.characterConnection = nil
-        end
+        if gui then gui:Destroy() end
+        gui = nil
+        window = nil
     end
 
     return {
         Start = start,
         Stop = stop,
         Destroy = destroy,
-        GetStatus = getStatus,
-        Tick = tick,
-        Phases = PHASE,
+        SetVisible = SetVisible,
+        ToggleVisible = ToggleVisible,
+        IsVisible = function() return visible end,
+        SetCallbacks = function(v) callbacks = v or {} end,
+        SetDiagnostics = function(v) Diagnostics = v end,
+        AttachKeybind = attachKeybind,
+        Render = function() end,
     }
 end
 
-return AutoFarm
+return EggHub

@@ -224,17 +224,23 @@ local Hub = EggHubModule.create({
     Config = Config,
     UserInputService = UserInputService,
     RunService = RunService,
+
     AutoFarm = AutoFarm,
-    SpeedBypass = SpeedBypass,
+    EggData = EggData,
+    EggState = deps.EggState,
+    AreaEggSlotIdentity = deps.AreaEggSlotIdentity,
+    STATES = deps.STATES,
+
+    Movement = Movement,
     PathService = PathService,
+    SpeedBypass = SpeedBypass,
+
     Diagnostics = Diagnostics,
     FarmFilters = FarmFilters,
-    EggData = EggData,
     BasePenAutomation = BasePenAutomation,
     InventoryManager = InventoryManager,
     PetAutomation = PetAutomation,
     LocalPlayer = deps.LocalPlayer,
-    Movement = Movement,
 })
 
 if Hub.AttachKeybind then
