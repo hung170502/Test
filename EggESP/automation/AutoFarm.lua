@@ -65,6 +65,10 @@ function AutoFarm.create(deps)
         rushFarmAfterDay = false,
         movementTrustRetryAt = 0,
         lastPickupAttemptAt = 0,
+        -- FIX: track trust retry attempts to avoid infinite loop
+        trustRetryCount = 0,
+        -- FIX: blacklist eggs that cannot be picked up (trust loop)
+        blacklistedEggUids = {},
     }
 
     local function compareEggPriority(a, b)
@@ -123,6 +127,8 @@ function AutoFarm.create(deps)
 
         if changed then
             state.pickupFailCount = 0
+            -- FIX: reset trust retry count when switching eggs
+            state.trustRetryCount = 0
             clearTargetPath()
         end
 
@@ -411,12 +417,30 @@ function AutoFarm.create(deps)
             EggData.InvalidateCache()
         end
 
+        -- FIX: expire old blacklist entries
+        local now = os.clock()
+        for uid, expiry in pairs(state.blacklistedEggUids) do
+            if now >= expiry then
+                state.blacklistedEggUids[uid] = nil
+            end
+        end
+
         if EggData.FindBestForFarm then
-            return EggData.FindBestForFarm(nil, force)
+            -- Try to find an egg not in the blacklist
+            local bestEgg = EggData.FindBestForFarm(nil, force)
+            if bestEgg and not state.blacklistedEggUids[bestEgg.uid] then
+                return bestEgg
+            end
+            -- If best is blacklisted, fall through to CollectAll search below
         end
 
         local eggs = EggData.CollectAll(force)
-        return eggs[1]
+        for _, egg in ipairs(eggs) do
+            if not state.blacklistedEggUids[egg.uid] then
+                return egg
+            end
+        end
+        return nil
     end
 
     local function refreshTargetEgg(force)
@@ -730,6 +754,8 @@ function AutoFarm.create(deps)
             setServerActionMode(false)
             state.pickupSettleTicks = 0
             state.pickupFailCount = 0
+            -- FIX: reset trust retry count on successful pickup
+            state.trustRetryCount = 0
             state.isCarrying = true
             state.carryUid = egg.record.Uid
             state.carryConfirmedAt = os.clock()
@@ -742,9 +768,29 @@ function AutoFarm.create(deps)
             state.detail = string.format("denied: %s", reason)
 
             if tostring(reason):lower():find("not currently trusted", 1, true) then
-                state.movementTrustRetryAt = os.clock() + 1.5
+                -- FIX: count trust retries; don't reset pickupFailCount so failsafe works
+                state.trustRetryCount = (state.trustRetryCount or 0) + 1
+                local maxTrustRetries = runtime.autoFarmMaxTrustRetries or 6
+
+                if state.trustRetryCount >= maxTrustRetries then
+                    -- Blacklist this egg and move on; too many trust failures
+                    local uid = egg.record and egg.record.Uid
+                    if uid then
+                        state.blacklistedEggUids[uid] = os.clock() + 60
+                        print(string.format("[EggESP Auto] Trust failed %d times for %s – blacklisted 60s", state.trustRetryCount, uid))
+                    end
+                    state.trustRetryCount = 0
+                    state.targetEgg = nil
+                    clearTargetPath()
+                    setServerActionMode(false)
+                    setPhase(PHASE.Standby, "trust sync failed")
+                    return false
+                end
+
+                -- Extend retry window and walk toward egg to establish server-side locomotion trust
+                state.movementTrustRetryAt = os.clock() + 2.5
                 state.pickupSettleTicks = 0
-                state.pickupFailCount = 0
+                -- NOTE: intentionally NOT resetting pickupFailCount here
                 if Movement.PrepareForServerAction then
                     Movement.PrepareForServerAction()
                 end
@@ -775,7 +821,8 @@ function AutoFarm.create(deps)
                 return Movement.TeleportTo(targetPos)
             end
 
-            if method == "Quick Steps" then
+            -- FIX: case-insensitive comparison for "Quick Steps" / "Quick steps"
+            if method:lower() == "quick steps" then
                 local rootPartNow = Movement.GetRootPart()
 
                 if rootPartNow then
@@ -810,6 +857,12 @@ function AutoFarm.create(deps)
             setPhase(PHASE.Pickup, "syncing movement trust")
             if Movement.EnsureLocomotion then Movement.EnsureLocomotion() end
             if Movement.PrepareForServerAction then Movement.PrepareForServerAction() end
+            -- FIX: actively walk toward egg so the server registers player locomotion
+            -- (trust is based on movement detection, not just calling PrepareForServerAction)
+            local trustEgg = state.targetEgg
+            if trustEgg and trustEgg.worldPos and Movement.WalkTo then
+                Movement.WalkTo(trustEgg.worldPos, runtime.pickupSyncWalkSpeed or 24)
+            end
             return
         end
 
@@ -896,7 +949,8 @@ function AutoFarm.create(deps)
                 return Movement.TeleportTo(targetPos)
             end
 
-            if method == "Quick Steps" then
+            -- FIX: case-insensitive comparison for "Quick Steps" / "Quick steps"
+            if method:lower() == "quick steps" then
                 local rootPart = Movement.GetRootPart()
 
                 if rootPart then
